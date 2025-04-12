@@ -4,10 +4,32 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\UserController;
+use App\Http\Controllers\Api\CategoryController;
+use App\Http\Controllers\Api\LevelController;
+
 
 Route::get('/test', function(){
     return response()->json(['message' => 'testing'], 200);
 });
+
+
+Route::put('categories/{id}/activate', [CategoryController::class, 'activate'])->name('categories.activate');
+Route::put('categories/{id}/deactivate', [CategoryController::class, 'deactivate'])->name('categories.deactivate');
+
+// Додаткові маршрути для категорій
+Route::prefix('categories')->group(function () {
+    Route::get('active', [CategoryController::class, 'getActive']);
+    Route::get('hierarchy', [CategoryController::class, 'getHierarchy']);
+    Route::get('slug/{slug}', [CategoryController::class, 'getBySlug']);
+    Route::post('positions', [CategoryController::class, 'updatePositions']);
+    Route::put('{id}/toggle-active', [CategoryController::class, 'toggleActive']);
+});
+
+// Маршрути для категорій
+Route::apiResource('categories', CategoryController::class);
+
+// Маршрути для рівнів
+Route::apiResource('levels', LevelController::class);
 
 // Публічні маршрути для авторизації
 Route::post('/register', [AuthController::class, 'register']);

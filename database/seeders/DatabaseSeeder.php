@@ -18,6 +18,8 @@ class DatabaseSeeder extends Seeder
             CountrySeeder::class,
             StatusSeeder::class,
             UserSeeder::class,
+            LevelSeeder::class,
+            CategorySeeder::class,
         ]);
     }
 }
