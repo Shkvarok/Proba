@@ -26,6 +26,7 @@ class LevelController extends Controller
     {
         $this->levelService = $levelService;
     }
+
     /**
      * Display a listing of the levels.
      */

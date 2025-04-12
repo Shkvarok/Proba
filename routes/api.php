@@ -7,36 +7,55 @@ use App\Http\Controllers\Api\UserController;
 use App\Http\Controllers\Api\CategoryController;
 use App\Http\Controllers\Api\LevelController;
 
-
-Route::get('/test', function(){
+Route::get('/test', function() {
     return response()->json(['message' => 'testing'], 200);
 });
 
-
-Route::put('categories/{id}/activate', [CategoryController::class, 'activate'])->name('categories.activate');
-Route::put('categories/{id}/deactivate', [CategoryController::class, 'deactivate'])->name('categories.deactivate');
-
-// Додаткові маршрути для категорій
-Route::prefix('categories')->group(function () {
-    Route::get('active', [CategoryController::class, 'getActive']);
-    Route::get('hierarchy', [CategoryController::class, 'getHierarchy']);
-    Route::get('slug/{slug}', [CategoryController::class, 'getBySlug']);
-    Route::post('positions', [CategoryController::class, 'updatePositions']);
-    Route::put('{id}/toggle-active', [CategoryController::class, 'toggleActive']);
-});
-
-// Маршрути для категорій
-Route::apiResource('categories', CategoryController::class);
-
-// Маршрути для рівнів
-Route::apiResource('levels', LevelController::class);
-
 // Публічні маршрути для авторизації
 Route::post('/register', [AuthController::class, 'register']);
-Route::post('/login', [AuthController::class, 'login'])->name('login'); 
-Route::get('/admins/list', [UserController::class, 'admins']);
+Route::post('/login', [AuthController::class, 'login'])->name('login');
 
-// Захищені маршрути
+// Публічні маршрути для категорій (тільки читання)
+Route::prefix('categories')->group(function () {
+    // GET запити (перегляд, пошук) - доступні всім
+    Route::get('/', [CategoryController::class, 'index']);
+    Route::get('/{category}', [CategoryController::class, 'show']);
+    Route::get('/active', [CategoryController::class, 'getActive']);
+    Route::get('/hierarchy', [CategoryController::class, 'getHierarchy']);
+    Route::get('/slug/{slug}', [CategoryController::class, 'getBySlug']);
+});
+
+// Публічні маршрути для рівнів (тільки читання)
+Route::prefix('levels')->group(function () {
+    // GET запити (перегляд) - доступні всім
+    Route::get('/', [LevelController::class, 'index']);
+    Route::get('/{level}', [LevelController::class, 'show']);
+});
+
+// Маршрути, захищені роллю admin або super_admin
+Route::middleware(['auth:sanctum', \App\Http\Middleware\CheckRole::class.':admin,super_admin'])->group(function () {
+    // Маршрути для категорій (тільки запис)
+    Route::prefix('categories')->group(function () {
+        // POST, PUT, DELETE запити - доступні тільки адмінам
+        Route::post('/', [CategoryController::class, 'store']);
+        Route::put('/{category}', [CategoryController::class, 'update']);
+        Route::delete('/{category}', [CategoryController::class, 'destroy']);
+        Route::post('/positions', [CategoryController::class, 'updatePositions']);
+        Route::put('/{id}/toggle-active', [CategoryController::class, 'toggleActive']);
+        Route::put('/{id}/activate', [CategoryController::class, 'activate']);
+        Route::put('/{id}/deactivate', [CategoryController::class, 'deactivate']);
+    });
+
+    // Маршрути для рівнів (тільки запис)
+    Route::prefix('levels')->group(function () {
+        // POST, PUT, DELETE запити - доступні тільки адмінам
+        Route::post('/', [LevelController::class, 'store']);
+        Route::put('/{level}', [LevelController::class, 'update']);
+        Route::delete('/{level}', [LevelController::class, 'destroy']);
+    });
+});
+
+// Решта захищених маршрутів
 Route::middleware('auth:sanctum')->group(function () {
     // Авторизація
     Route::post('/logout', [AuthController::class, 'logout']);
@@ -63,7 +82,6 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::delete('/{id}', [UserController::class, 'destroy']);
     });
 });
-
 
 Route::get('/run-seeders', function () {
     Artisan::call('db:seed');

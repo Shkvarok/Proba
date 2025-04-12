@@ -6,17 +6,23 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\CategoryRequest;
 use App\Http\Resources\CategoryResource;
 use App\Models\Category;
+use App\Services\CategoryService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
-use Illuminate\Support\Str;
-use App\Services\CategoryService;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Storage;
 
 class CategoryController extends Controller
 {
+    /**
+     * @var CategoryService
+     */
     protected $categoryService;
 
+    /**
+     * CategoryController constructor.
+     *
+     * @param CategoryService $categoryService
+     */
     public function __construct(CategoryService $categoryService)
     {
         $this->categoryService = $categoryService;
@@ -71,16 +77,21 @@ class CategoryController extends Controller
             'message' => 'Категорію успішно видалено'
         ]);
     }
-    public function getActive()
+
+    /**
+     * Get active categories.
+     */
+    public function getActive(): AnonymousResourceCollection
     {
         return CategoryResource::collection(
             $this->categoryService->getActiveCategories()
         );
     }
+
     /**
      * Get categories hierarchy.
      */
-    public function getHierarchy()
+    public function getHierarchy(): AnonymousResourceCollection
     {
         return CategoryResource::collection(
             $this->categoryService->getCategoriesHierarchy()
@@ -96,13 +107,13 @@ class CategoryController extends Controller
     public function getBySlug(string $slug)
     {
         $category = $this->categoryService->getCategoryBySlug($slug);
-    
+
         if (!$category) {
             return response()->json([
                 'message' => 'Категорію не знайдено'
             ], 404);
         }
-    
+
         return new CategoryResource($category);
     }
 
@@ -112,31 +123,43 @@ class CategoryController extends Controller
      * @param Request $request
      * @return JsonResponse
      */
-    public function updatePositions(Request $request)
+    public function updatePositions(Request $request): JsonResponse
     {
         $request->validate([
             'positions' => 'required|array',
             'positions.*.id' => 'required|integer|exists:categories,id',
             'positions.*.position' => 'required|integer|min:0',
         ]);
-    
+
         $this->categoryService->updateCategoryPositions($request->input('positions'));
-    
+
         return response()->json([
             'message' => 'Позиції категорій успішно оновлено'
         ]);
     }
-    
-    public function toggleActive(int $id)
+
+    /**
+     * Toggle category active status.
+     * 
+     * @param int $id
+     * @return JsonResponse
+     */
+    public function toggleActive(int $id): JsonResponse
     {
         $category = $this->categoryService->toggleCategoryActive($id);
-    
+
         return response()->json([
             'message' => 'Статус категорії успішно змінено',
             'is_active' => $category->is_active
         ]);
     }
-    
+
+    /**
+     * Активувати категорію.
+     *
+     * @param int $id
+     * @return JsonResponse
+     */
     public function activate(int $id): JsonResponse
     {
         $category = $this->categoryService->activateCategory($id);
@@ -170,5 +193,4 @@ class CategoryController extends Controller
             ]
         ]);
     }
-
 }
