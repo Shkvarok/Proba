@@ -2,8 +2,8 @@
 
 namespace Database\Seeders;
 
-use App\Models\Role;
 use Illuminate\Database\Seeder;
+use Illuminate\Support\Facades\DB;
 
 class RoleSeeder extends Seeder
 {
@@ -12,27 +12,49 @@ class RoleSeeder extends Seeder
      */
     public function run(): void
     {
+        // Перевіряємо, чи вже є ролі в базі даних
+        $rolesCount = DB::table('roles')->count();
+        
+        if ($rolesCount > 0) {
+            $this->command->info('Таблиця ролей вже містить дані. Пропускаємо наповнення.');
+            return;
+        }
+
+        // Основні ролі
         $roles = [
             [
                 'name' => 'super_admin',
-                'description' => 'Має повний доступ до всіх функцій системи',
+                'display_name' => 'Супер Адміністратор',
+                'description' => 'Повний доступ до всієї системи',
+                'created_at' => now(),
+                'updated_at' => now(),
             ],
             [
                 'name' => 'admin',
-                'description' => 'Адміністратор з обмеженими можливостями',
+                'display_name' => 'Адміністратор',
+                'description' => 'Управління контентом та користувачами',
+                'created_at' => now(),
+                'updated_at' => now(),
             ],
             [
-                'name' => 'teacher',
-                'description' => 'Викладач курсів',
+                'name' => 'instructor',
+                'display_name' => 'Інструктор',
+                'description' => 'Створення та управління курсами',
+                'created_at' => now(),
+                'updated_at' => now(),
             ],
             [
-                'name' => 'student',
-                'description' => 'Студент, який проходить курси',
+                'name' => 'user',
+                'display_name' => 'Користувач',
+                'description' => 'Стандартний користувач системи',
+                'created_at' => now(),
+                'updated_at' => now(),
             ],
         ];
 
-        foreach ($roles as $role) {
-            Role::create($role);
-        }
+        // Вставляємо ролі
+        DB::table('roles')->insert($roles);
+
+        $this->command->info('Наповнення таблиці ролей завершено.');
     }
 }

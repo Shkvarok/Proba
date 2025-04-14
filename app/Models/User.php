@@ -69,11 +69,11 @@ class User extends Authenticatable
     /**
      * Перевірити чи користувач має певну роль
      */
-    public function hasRole(string $roleName): bool
+    public function hasRole(string $role): bool
     {
-        return $this->role->name === $roleName;
+        return $this->role === $role;
     }
-
+    
     /**
      * Перевірити чи користувач має якусь із ролей
      */
@@ -113,4 +113,6 @@ class User extends Authenticatable
     {
         return trim($this->first_name . ' ' . $this->last_name);
     }
+
+    
 }

@@ -253,4 +253,6 @@ class UserController extends Controller
             'message' => 'Користувача успішно видалено'
         ], 200);
     }
+
+    
 }

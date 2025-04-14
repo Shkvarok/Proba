@@ -12,11 +12,49 @@ class LevelSeeder extends Seeder
      */
     public function run(): void
     {
-        DB::table('levels')->insert([
-            ['code' => 'beginner', 'name' => 'Початковий', 'description' => 'Для новачків без попереднього досвіду'],
-            ['code' => 'intermediate', 'name' => 'Середній', 'description' => 'Для тих, хто має базові знання'],
-            ['code' => 'advanced', 'name' => 'Просунутий', 'description' => 'Для досвідчених користувачів'],
-            ['code' => 'all-levels', 'name' => 'Всі рівні', 'description' => 'Підходить для будь-якого рівня знань'],
-        ]);
+        // Перевіряємо, чи вже є рівні в базі даних
+        $levelsCount = DB::table('levels')->count();
+        
+        if ($levelsCount > 0) {
+            $this->command->info('Таблиця рівнів вже містить дані. Пропускаємо наповнення.');
+            return;
+        }
+
+        // Рівні складності
+        $levels = [
+            [
+                'code' => 'beginner',
+                'name' => 'Початковий',
+                'description' => 'Для новачків без попереднього досвіду',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+            [
+                'code' => 'intermediate',
+                'name' => 'Середній',
+                'description' => 'Для тих, хто має базові знання',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+            [
+                'code' => 'advanced',
+                'name' => 'Просунутий',
+                'description' => 'Для досвідчених користувачів',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+            [
+                'code' => 'all-levels',
+                'name' => 'Всі рівні',
+                'description' => 'Підходить для будь-якого рівня знань',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+        ];
+
+        // Вставляємо рівні в базу даних
+        DB::table('levels')->insert($levels);
+
+        $this->command->info('Наповнення таблиці рівнів завершено.');
     }
 }

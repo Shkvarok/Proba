@@ -21,18 +21,21 @@ class CheckRole
             ], 401);
         }
 
+        // Тимчасово пропускаємо користувача з роллю super_admin без додаткових перевірок
+        if (isset($request->user()->role->name) && $request->user()->role->name === 'super_admin') {
+            return $next($request);
+        }
+
         // Якщо ролі не вказані, пропускаємо
         if (empty($roles)) {
             return $next($request);
         }
-
-        // Перевіряємо, чи має користувач хоч одну з необхідних ролей
-        foreach ($roles as $role) {
-            if ($request->user()->hasRole($role)) {
-                return $next($request);
-            }
+    
+        // Перевірка ролі, яка є об'єктом
+        if (isset($request->user()->role->name) && in_array($request->user()->role->name, $roles)) {
+            return $next($request);
         }
-
+    
         return response()->json([
             'message' => 'У вас немає доступу до цього ресурсу'
         ], 403);

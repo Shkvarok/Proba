@@ -7,6 +7,7 @@ use App\Repositories\LevelRepository;
 use App\Services\CategoryService;
 use App\Services\LevelService;
 use Illuminate\Support\ServiceProvider;
+use App\Services\ProfileService; // Додано ProfileService
 
 class ApiServiceProvider extends ServiceProvider
 {
@@ -36,6 +37,11 @@ class ApiServiceProvider extends ServiceProvider
                 $app->make(LevelRepository::class)
             );
         });
+
+                // Реєстрація ProfileService
+                $this->app->singleton(ProfileService::class, function ($app) {
+                    return new ProfileService();
+                });
     }
 
     /**
