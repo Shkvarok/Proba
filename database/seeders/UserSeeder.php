@@ -24,7 +24,7 @@ class UserSeeder extends Seeder
         User::create([
             'email' => 'superadmin@example.com',
             'password' => Hash::make('password'),
-            'first_name' => 'Super',
+            'name' => 'Super Admin',
             'last_name' => 'Admin',
             'role_id' => $superAdminRole->id,
             'email_verified_at' => now(),
@@ -34,7 +34,7 @@ class UserSeeder extends Seeder
         User::create([
             'email' => 'admin@example.com',
             'password' => Hash::make('password'),
-            'first_name' => 'Admin',
+            'name' => 'Admin User',
             'last_name' => 'User',
             'role_id' => $adminRole->id,
             'email_verified_at' => now(),
@@ -44,7 +44,7 @@ class UserSeeder extends Seeder
         User::create([
             'email' => 'teacher1@example.com',
             'password' => Hash::make('password'),
-            'first_name' => 'Іван',
+            'name' => 'Іван Петренко',
             'last_name' => 'Петренко',
             'role_id' => $teacherRole->id,
             'email_verified_at' => now(),
@@ -53,7 +53,7 @@ class UserSeeder extends Seeder
         User::create([
             'email' => 'teacher2@example.com',
             'password' => Hash::make('password'),
-            'first_name' => 'Олена',
+            'name' => 'Олена Коваленко',
             'last_name' => 'Коваленко',
             'role_id' => $teacherRole->id,
             'email_verified_at' => now(),
@@ -64,7 +64,7 @@ class UserSeeder extends Seeder
             User::create([
                 'email' => "student{$i}@example.com",
                 'password' => Hash::make('password'),
-                'first_name' => "Студент{$i}",
+                'name' => "Студент{$i} Прізвище{$i}",
                 'last_name' => "Прізвище{$i}",
                 'role_id' => $studentRole->id,
                 'email_verified_at' => now(),

@@ -20,32 +20,28 @@ class RoleSeeder extends Seeder
             return;
         }
 
-        // Основні ролі
+        // Основні ролі зі зміненими назвами, щоб відповідати UserSeeder
         $roles = [
             [
                 'name' => 'super_admin',
-                'display_name' => 'Супер Адміністратор',
                 'description' => 'Повний доступ до всієї системи',
                 'created_at' => now(),
                 'updated_at' => now(),
             ],
             [
                 'name' => 'admin',
-                'display_name' => 'Адміністратор',
                 'description' => 'Управління контентом та користувачами',
                 'created_at' => now(),
                 'updated_at' => now(),
             ],
             [
-                'name' => 'instructor',
-                'display_name' => 'Інструктор',
+                'name' => 'teacher', // Змінено з 'instructor' на 'teacher'
                 'description' => 'Створення та управління курсами',
                 'created_at' => now(),
                 'updated_at' => now(),
             ],
             [
-                'name' => 'user',
-                'display_name' => 'Користувач',
+                'name' => 'student', // Змінено з 'user' на 'student'
                 'description' => 'Стандартний користувач системи',
                 'created_at' => now(),
                 'updated_at' => now(),
