@@ -7,11 +7,10 @@ use App\Http\Controllers\Api\UserController;
 use App\Http\Controllers\Api\CategoryController;
 use App\Http\Controllers\Api\LevelController;
 use App\Http\Controllers\Api\CourseController;
-use App\Http\Controllers\Api\InstructorController;
 use App\Http\Controllers\Api\ProfileController;
-use App\Http\Controllers\Api\LessonController;
-use App\Http\Controllers\Api\CourseAccessRequestController;
-use App\Http\Controllers\Api\StudentCourseController;
+use App\Http\Controllers\Api\PasswordResetController;
+
+
 
 // Тестовий маршрут
 Route::get('/test', function() {
@@ -34,8 +33,13 @@ Route::get('/migrate-fresh', function () {
 // ========================================
 // Маршрути авторизації (публічні)
 // ========================================
-Route::post('/register', [AuthController::class, 'register']);
-Route::post('/login', [AuthController::class, 'login'])->name('login');
+    Route::post('/register', [AuthController::class, 'register']);
+    Route::post('/login', [AuthController::class, 'login'])->name('login');
+
+    // Маршрути для скидання паролю
+        Route::post('/password/send-reset-code', [PasswordResetController::class, 'sendResetCode']);
+        Route::post('/password/verify-code', [PasswordResetController::class, 'verifyResetCode']);
+        Route::post('/password/reset', [PasswordResetController::class, 'resetPassword']);
 
 // ========================================
 // Публічні маршрути (без автентифікації)
@@ -66,11 +70,7 @@ Route::prefix('courses')->group(function () {
     Route::get('/instructor/{instructorId}', [CourseController::class, 'getByInstructor'])->where('instructorId', '[0-9]+');
 });
 
-// Уроки (тільки читання)
-Route::prefix('courses/{courseId}/lessons')->group(function () {
-    Route::get('/', [LessonController::class, 'index']);
-    Route::get('/{lessonId}', [LessonController::class, 'show'])->where('lessonId', '[0-9]+');
-});
+
 
 // ========================================
 // Захищені маршрути (потрібна автентифікація)
@@ -120,29 +120,9 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/admins', [UserController::class, 'storeAdmin']);
     });
     
-    // ----------------------------------------
-    // Уроки
-    // ----------------------------------------
-    Route::prefix('courses/{courseId}/lessons')->group(function () {
-        Route::post('/', [LessonController::class, 'store']);
-        Route::put('/{lessonId}', [LessonController::class, 'update'])->where('lessonId', '[0-9]+');
-        Route::delete('/{lessonId}', [LessonController::class, 'destroy'])->where('lessonId', '[0-9]+');
-        Route::post('/order', [LessonController::class, 'updateOrder']);
-    });
+  
     
-    // ----------------------------------------
-    // Студентські курси та доступи
-    // ----------------------------------------
-    // Особисті курси студента
-    Route::get('/my-courses', [StudentCourseController::class, 'myCourses']);
-    
-    // Перевірка доступу до курсу
-    Route::get('/courses/{courseId}/check-access', [StudentCourseController::class, 'checkAccess']);
-    
-    // Запити на доступ до курсів
-    Route::post('/course-access-requests', [CourseAccessRequestController::class, 'requestAccess']);
-    Route::get('/course-access-requests/{id}', [CourseAccessRequestController::class, 'show']);
-    
+  
     // ========================================
     // Маршрути для адміністраторів
     // ========================================
@@ -180,18 +160,6 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::put('/{id}/unpublish', [CourseController::class, 'unpublish'])->where('id', '[0-9]+');
         });
         
-        // ----------------------------------------
-        // Запити на доступ (адміністрування)
-        // ----------------------------------------
-        Route::get('/my-access-requests', [CourseAccessRequestController::class, 'index']);
-        Route::put('/course-access-requests/{id}/approve', [CourseAccessRequestController::class, 'approve']);
-        Route::put('/course-access-requests/{id}/reject', [CourseAccessRequestController::class, 'reject']);
-        
-        // ----------------------------------------
-        // Доступи студентів (адміністрування)
-        // ----------------------------------------
-        Route::get('/courses/{courseId}/students', [StudentCourseController::class, 'courseStudents']);
-        Route::post('/student-courses', [StudentCourseController::class, 'grantAccess']);
-        Route::put('/student-courses/{id}/revoke', [StudentCourseController::class, 'revokeAccess']);
+
     });
 });

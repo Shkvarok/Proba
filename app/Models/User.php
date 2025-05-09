@@ -68,17 +68,17 @@ class User extends Authenticatable
     /**
      * Перевірити чи користувач має певну роль
      */
-    public function hasRole(string $role): bool
+    public function hasRole(string $roleName): bool
     {
-        return $this->role === $role;
+        return $this->role && $this->role->name === $roleName;
     }
-        
+    
     /**
      * Перевірити чи користувач має якусь із ролей
      */
     public function hasAnyRole(array $roleNames): bool
     {
-        return in_array($this->role->name, $roleNames);
+        return $this->role && in_array($this->role->name, $roleNames);
     }
     
     /**
@@ -86,7 +86,7 @@ class User extends Authenticatable
      */
     public function hasPermission(string $permissionSlug): bool
     {
-        return $this->role->hasPermission($permissionSlug);
+        return $this->role && $this->role->hasPermission($permissionSlug);
     }
     
     /**
@@ -94,7 +94,10 @@ class User extends Authenticatable
      */
     public function getFullNameAttribute(): string
     {
-        return trim($this->name . ' ' . $this->last_name);
+        $name = $this->name ?? '';
+        $lastName = $this->last_name ?? '';
+        
+        return trim($name . ' ' . $lastName);
     }
     
     /**
@@ -104,17 +107,4 @@ class User extends Authenticatable
     {
         return $this->hasAnyRole(['admin', 'super_admin']);
     }
-    
-    /**
-     * Оскільки name тепер є окремим полем, цей мутатор більше не потрібен
-     * але якщо ви хочете зберегти зворотну сумісність з кодом, який використовує
-     * $user->name, але при цьому зберігати ім'я в полі first_name, 
-     * ви можете залишити цей метод
-     */
-    /*
-    public function getNameAttribute()
-    {
-        return $this->attributes['name'] ?? '';
-    }
-    */
 }
