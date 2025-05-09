@@ -81,13 +81,6 @@ class User extends Authenticatable
         return $this->role && in_array($this->role->name, $roleNames);
     }
     
-    /**
-     * Перевірити чи користувач має певний дозвіл
-     */
-    public function hasPermission(string $permissionSlug): bool
-    {
-        return $this->role && $this->role->hasPermission($permissionSlug);
-    }
     
     /**
      * Отримати повне ім'я користувача з урахуванням прізвища

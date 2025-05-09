@@ -76,7 +76,7 @@ class ProfileService
         $filename = 'avatar_' . time() . '_' . Str::random(10) . '.' . $avatar->getClientOriginalExtension();
         
         // Зберігаємо в папці courses, як було вказано в завданні
-        $path = $avatar->storeAs('courses', $filename, 'public');
+        $path = $avatar->storeAs('avatars', $filename, 'public');
         
         return $path;
     }

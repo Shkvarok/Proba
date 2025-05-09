@@ -109,9 +109,18 @@ class AuthController extends Controller
     /**
      * Отримання інформації про поточного користувача
      */
+// У методі me контролера AuthController:
     public function me(Request $request)
     {
         $user = $request->user()->load('role', 'country');
+        
+        // Для логування
+        \Log::info('User Me: User loaded', [
+            'user_id' => $user->id,
+            'email' => $user->email,
+            'role_id' => $user->role_id,
+            'role_name' => $user->role ? $user->role->name : 'null'
+        ]);
         
         return response()->json([
             'user' => $user

@@ -16,23 +16,29 @@ class UserController extends Controller
      */
     public function index()
     {
-        if (!auth()->user()) {
+        try {
+            \Log::info('UserController@index: Початок методу');
+            
+            $users = User::with('role')->get();
+            
+            \Log::info('UserController@index: Користувачів завантажено', [
+                'count' => count($users)
+            ]);
+            
             return response()->json([
-                'message' => 'Необхідна авторизація'
-            ], 401);
-        }
-        // Перевіряємо чи має користувач дозвіл на перегляд користувачів
-        if (!auth()->user()->hasPermission('view-users')) {
+                'users' => $users
+            ], 200);
+        } catch (\Exception $e) {
+            \Log::error('UserController@index: Помилка', [
+                'message' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            
             return response()->json([
-                'message' => 'У вас немає доступу до цього ресурсу'
-            ], 403);
+                'message' => 'Сталася помилка при отриманні користувачів',
+                'error' => $e->getMessage()
+            ], 500);
         }
-
-        $users = User::with('role')->get();
-
-        return response()->json([
-            'users' => $users
-        ], 200);
     }
 
     /**
@@ -40,18 +46,6 @@ class UserController extends Controller
      */
     public function admins()
     {
-        if (!auth()->user()) {
-            return response()->json([
-                'message' => 'Необхідна авторизація'
-            ], 401);
-        }
-        
-        if (!auth()->user()->hasAnyRole(['admin', 'super_admin'])) {
-            return response()->json([
-                'message' => 'У вас немає доступу до цього ресурсу'
-            ], 403);
-        }
-        
         // Отримуємо ID ролей для адміністраторів
         $adminRoles = Role::whereIn('name', ['admin', 'super_admin'])->pluck('id');
         
@@ -67,22 +61,121 @@ class UserController extends Controller
      */
     public function storeAdmin(Request $request)
     {
-        if (!auth()->user()) {
-            return response()->json([
-                'message' => 'Необхідна авторизація'
-            ], 401);
-        }
-        // Перевіряємо чи користувач має право на створення користувачів
-        if (!auth()->user()->hasPermission('create-users')) {
-            return response()->json([
-                'message' => 'У вас немає доступу до цього ресурсу'
-            ], 403);
-        }
+        try {
+            \Log::info('UserController@storeAdmin: Початок виконання', [
+                'request_data' => $request->all()
+            ]);
+            
+            $validator = Validator::make($request->all(), [
+                'email' => 'required|email|unique:users,email',
+                'password' => 'required|string|min:8',
+                'name' => 'required|string|max:50',
+                'last_name' => 'required|string|max:50',
+                'country_id' => 'nullable|exists:countries,id',
+                'phone_number' => 'nullable|string|max:20',
+                'is_super_admin' => 'sometimes|boolean'
+            ]);
 
+            if ($validator->fails()) {
+                \Log::warning('UserController@storeAdmin: Помилка валідації', [
+                    'errors' => $validator->errors()->toArray()
+                ]);
+                
+                return response()->json([
+                    'message' => 'Помилка валідації даних',
+                    'errors' => $validator->errors()
+                ], 422);
+            }
+
+            // Визначаємо роль для нового користувача
+            $roleName = 'admin';
+            
+            // Перевіряємо, чи аутентифікований користувач
+            if (auth()->check()) {
+                // Явно завантажуємо роль, якщо вона ще не завантажена
+                $authUser = auth()->user();
+                if (!$authUser->relationLoaded('role')) {
+                    $authUser->load('role');
+                }
+                
+                \Log::info('UserController@storeAdmin: Перевірка ролі аутентифікованого користувача', [
+                    'user_id' => $authUser->id,
+                    'role_id' => $authUser->role_id,
+                    'role' => $authUser->role ? $authUser->role->name : 'null'
+                ]);
+                
+                // Безпечна перевірка на super_admin
+                if ($authUser->role && $authUser->role->name === 'super_admin' && 
+                    $request->has('is_super_admin') && $request->is_super_admin) {
+                    $roleName = 'super_admin';
+                    \Log::info('UserController@storeAdmin: Створення super_admin');
+                }
+            } else {
+                \Log::warning('UserController@storeAdmin: Користувач не аутентифікований');
+                return response()->json([
+                    'message' => 'Необхідна авторизація'
+                ], 401);
+            }
+            
+            // Знаходимо роль
+            $role = Role::where('name', $roleName)->first();
+            
+            \Log::info('UserController@storeAdmin: Пошук ролі', [
+                'role_name' => $roleName,
+                'role_found' => $role ? 'yes' : 'no'
+            ]);
+            
+            if (!$role) {
+                return response()->json([
+                    'message' => 'Не знайдено потрібну роль'
+                ], 500);
+            }
+
+            // Створюємо користувача
+            $user = User::create([
+                'email' => $request->email,
+                'password' => Hash::make($request->password),
+                'name' => $request->name,
+                'last_name' => $request->last_name,
+                'country_id' => $request->country_id ?? null,
+                'phone_number' => $request->phone_number,
+                'role_id' => $role->id,
+                'email_verified_at' => now(),
+            ]);
+            
+            \Log::info('UserController@storeAdmin: Користувача створено', [
+                'user_id' => $user->id,
+                'email' => $user->email
+            ]);
+
+            return response()->json([
+                'message' => 'Адміністратора успішно створено',
+                'admin' => $user->load('role')
+            ], 201);
+        } catch (\Exception $e) {
+            \Log::error('UserController@storeAdmin: Помилка', [
+                'message' => $e->getMessage(),
+                'line' => $e->getLine(),
+                'file' => $e->getFile(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            
+            return response()->json([
+                'message' => 'Сталася помилка при створенні адміністратора',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+    
+    /**
+     * Створення вчителя
+     */
+    public function storeTeacher(Request $request)
+    {
         $validator = Validator::make($request->all(), [
             'email' => 'required|email|unique:users,email',
             'password' => 'required|string|min:8',
-            'first_name' => 'required|string|max:50',
+            'name' => 'required|string|max:50',
             'last_name' => 'required|string|max:50',
             'country_id' => 'nullable|exists:countries,id',
             'phone_number' => 'nullable|string|max:20',
@@ -95,33 +188,28 @@ class UserController extends Controller
             ], 422);
         }
 
-        // Отримуємо роль адміністратора
-        $adminRole = Role::where('name', 'admin')->first();
-        if (!$adminRole) {
+        // Отримуємо роль вчителя
+        $teacherRole = Role::where('name', 'teacher')->first();
+        if (!$teacherRole) {
             return response()->json([
-                'message' => 'Не знайдено роль адміністратора'
+                'message' => 'Не знайдено роль вчителя'
             ], 500);
-        }
-
-        // Якщо користувач є супер-адміном і хоче створити супер-адміна
-        if (auth()->user()->hasRole('super_admin') && $request->has('is_super_admin') && $request->is_super_admin) {
-            $adminRole = Role::where('name', 'super_admin')->first();
         }
 
         $user = User::create([
             'email' => $request->email,
             'password' => Hash::make($request->password),
-            'first_name' => $request->first_name,
+            'name' => $request->name,
             'last_name' => $request->last_name,
             'country_id' => $request->country_id,
             'phone_number' => $request->phone_number,
-            'role_id' => $adminRole->id,
-            'email_verified_at' => now(), // Верифікуємо email одразу
+            'role_id' => $teacherRole->id,
+            'email_verified_at' => now(),
         ]);
 
         return response()->json([
-            'message' => 'Адміністратора успішно створено',
-            'admin' => $user->load('role')
+            'message' => 'Вчителя успішно створено',
+            'teacher' => $user->load('role')
         ], 201);
     }
 
@@ -130,23 +218,31 @@ class UserController extends Controller
      */
     public function show($id)
     {
-        if (!auth()->user()) {
+        try {
+            \Log::info('UserController@show: Початок методу', ['id' => $id]);
+            
+            $user = User::with('role', 'country')->findOrFail($id);
+            
+            \Log::info('UserController@show: Користувача знайдено', [
+                'user_id' => $user->id,
+                'email' => $user->email
+            ]);
+            
             return response()->json([
-                'message' => 'Необхідна авторизація'
-            ], 401);
-        }
-        // Перевіряємо чи має користувач дозвіл на перегляд користувачів
-        if (!auth()->user()->hasPermission('view-users')) {
+                'user' => $user
+            ], 200);
+        } catch (\Exception $e) {
+            \Log::error('UserController@show: Помилка', [
+                'id' => $id,
+                'message' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            
             return response()->json([
-                'message' => 'У вас немає доступу до цього ресурсу'
-            ], 403);
+                'message' => 'Сталася помилка при отриманні користувача',
+                'error' => $e->getMessage()
+            ], 500);
         }
-
-        $user = User::with('role', 'country')->findOrFail($id);
-
-        return response()->json([
-            'user' => $user
-        ], 200);
     }
 
     /**
@@ -154,26 +250,11 @@ class UserController extends Controller
      */
     public function update(Request $request, $id)
     {
-        if (!auth()->user()) {
-            return response()->json([
-                'message' => 'Необхідна авторизація'
-            ], 401);
-        }
-        // Перевіряємо чи має користувач дозвіл на редагування користувачів
-        if (!auth()->user()->hasPermission('edit-users')) {
-            // Дозволяємо користувачам редагувати власний профіль
-            if (auth()->id() != $id) {
-                return response()->json([
-                    'message' => 'У вас немає доступу до цього ресурсу'
-                ], 403);
-            }
-        }
-
         $user = User::findOrFail($id);
 
         $validator = Validator::make($request->all(), [
             'email' => 'sometimes|required|email|unique:users,email,' . $id,
-            'first_name' => 'sometimes|required|string|max:50',
+            'name' => 'sometimes|required|string|max:50',
             'last_name' => 'sometimes|required|string|max:50',
             'country_id' => 'nullable|exists:countries,id',
             'phone_number' => 'nullable|string|max:20',
@@ -189,19 +270,16 @@ class UserController extends Controller
 
         // Перевіряємо, чи може поточний користувач змінювати роль
         if ($request->has('role_id') && $user->role_id != $request->role_id) {
-            // Тільки адміни можуть змінювати ролі
-            if (!auth()->user()->isAdmin()) {
-                return response()->json([
-                    'message' => 'У вас немає дозволу змінювати роль користувача'
-                ], 403);
-            }
-            
-            // Звичайний адмін не може призначати роль Super Admin
             $newRole = Role::find($request->role_id);
-            if ($newRole && $newRole->name == 'super_admin' && !auth()->user()->hasRole('super_admin')) {
-                return response()->json([
-                    'message' => 'У вас немає дозволу призначати роль Super Admin'
-                ], 403);
+            
+            // Якщо намагаються встановити роль супер-адміна
+            if ($newRole && $newRole->name == 'super_admin') {
+                // Тільки супер-адмін може призначати роль супер-адміна
+                if (auth()->user()->role->name !== 'super_admin') {
+                    return response()->json([
+                        'message' => 'У вас немає дозволу призначати роль Super Admin'
+                    ], 403);
+                }
             }
         }
 
@@ -213,46 +291,90 @@ class UserController extends Controller
             'user' => $user->fresh()->load('role', 'country')
         ], 200);
     }
+    
+    /**
+     * Зміна ролі користувача
+     */
+    public function changeRole(Request $request, $id)
+    {
+        $validator = Validator::make($request->all(), [
+            'role_id' => 'required|exists:roles,id',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'message' => 'Помилка валідації даних',
+                'errors' => $validator->errors()
+            ], 422);
+        }
+
+        $user = User::findOrFail($id);
+        $newRole = Role::findOrFail($request->role_id);
+        
+        // Перевірка на спробу зміни ролі на super_admin
+        if ($newRole->name === 'super_admin' && auth()->user()->role->name !== 'super_admin') {
+            return response()->json([
+                'message' => 'Тільки супер-адміністратор може призначати роль супер-адміністратора'
+            ], 403);
+        }
+
+        $user->role_id = $request->role_id;
+        $user->save();
+        
+        return response()->json([
+            'message' => 'Роль користувача успішно змінено',
+            'user' => $user->load('role')
+        ], 200);
+    }
 
     /**
      * Видалення користувача
      */
-    public function destroy($id)
-    {
-        if (!auth()->user()) {
-            return response()->json([
-                'message' => 'Необхідна авторизація'
-            ], 401);
-        }
-        // Перевіряємо чи має користувач дозвіл на видалення користувачів
-        if (!auth()->user()->hasPermission('delete-users')) {
-            return response()->json([
-                'message' => 'У вас немає доступу до цього ресурсу'
-            ], 403);
-        }
+   public function destroy($id)
+{
+    $user = User::findOrFail($id);
 
-        $user = User::findOrFail($id);
-
-        // Заборона видаляти себе
-        if (auth()->id() == $id) {
-            return response()->json([
-                'message' => 'Ви не можете видалити власний обліковий запис'
-            ], 403);
-        }
-
-        // Звичайний адмін не може видаляти Super Admin
-        if ($user->hasRole('super_admin') && !auth()->user()->hasRole('super_admin')) {
-            return response()->json([
-                'message' => 'У вас немає дозволу видаляти Super Admin'
-            ], 403);
-        }
-
-        $user->delete();
-
+    // Заборона видаляти себе
+    if (auth()->id() == $id) {
         return response()->json([
-            'message' => 'Користувача успішно видалено'
-        ], 200);
+            'message' => 'Ви не можете видалити власний обліковий запис'
+        ], 403);
     }
 
-    
+    if ($user->role && $user->role->name === 'super_admin') {
+        return response()->json([
+            'message' => 'Користувача з роллю Super Admin не можна видалити'
+        ], 403);
+    }
+
+    // Заборона видаляти користувача з ID = 1
+    // if ($id == 1) {
+    //     return response()->json([
+    //         'message' => 'Super Admin не може бути видалений'
+    //     ], 403);
+    // }
+
+
+    // Звичайний адмін не може видаляти Super Admin
+    if ($user->role && $user->role->name == 'super_admin' && auth()->user()->role->name != 'super_admin') {
+        return response()->json([
+            'message' => 'У вас немає дозволу видаляти Super Admin'
+        ], 403);
+    }
+
+    $user->delete();
+
+    return response()->json([
+        'message' => 'Користувача успішно видалено'
+    ], 200);
+}
+
+    public function __construct()
+{
+    \Log::info('UserController: Конструктор викликано', [
+        'auth' => auth()->check() ? 'authenticated' : 'not authenticated',
+        'user_id' => auth()->check() ? auth()->id() : null,
+        'role' => auth()->check() && auth()->user()->role ? auth()->user()->role->name : null
+    ]);
+}
 }

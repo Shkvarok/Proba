@@ -10,13 +10,40 @@ use App\Http\Controllers\Api\CourseController;
 use App\Http\Controllers\Api\ProfileController;
 use App\Http\Controllers\Api\PasswordResetController;
 
-
-
 // Тестовий маршрут
 Route::get('/test', function() {
     return response()->json(['message' => 'testing'], 200);
 });
 
+Route::get('/test-routes', function() {
+    $routes = [];
+    
+    foreach (Route::getRoutes() as $route) {
+        if (strpos($route->uri, 'api/users') !== false) {
+            $routes[] = [
+                'uri' => $route->uri,
+                'methods' => $route->methods,
+                'action' => $route->getActionName()
+            ];
+        }
+    }
+    
+    return response()->json([
+        'routes' => $routes
+    ]);
+});
+// Додайте перед маршрутами для адміністраторів 
+Route::middleware('auth:sanctum')->get('/debug-auth', function (Request $request) {
+    $user = $request->user()->load('role');
+    return response()->json([
+        'user_id' => $user->id,
+        'email' => $user->email,
+        'role_id' => $user->role_id,
+        'role' => $user->role ? $user->role->name : null,
+        'is_admin' => $user->isAdmin(),
+        'is_super_admin' => $user->hasRole('super_admin')
+    ]);
+});
 // ========================================
 // Утиліти для розробки
 // ========================================
@@ -33,13 +60,13 @@ Route::get('/migrate-fresh', function () {
 // ========================================
 // Маршрути авторизації (публічні)
 // ========================================
-    Route::post('/register', [AuthController::class, 'register']);
-    Route::post('/login', [AuthController::class, 'login'])->name('login');
+Route::post('/register', [AuthController::class, 'register']);
+Route::post('/login', [AuthController::class, 'login'])->name('login');
 
-    // Маршрути для скидання паролю
-        Route::post('/password/send-reset-code', [PasswordResetController::class, 'sendResetCode']);
-        Route::post('/password/verify-code', [PasswordResetController::class, 'verifyResetCode']);
-        Route::post('/password/reset', [PasswordResetController::class, 'resetPassword']);
+// Маршрути для скидання паролю
+Route::post('/password/send-reset-code', [PasswordResetController::class, 'sendResetCode']);
+Route::post('/password/verify-code', [PasswordResetController::class, 'verifyResetCode']);
+Route::post('/password/reset', [PasswordResetController::class, 'resetPassword']);
 
 // ========================================
 // Публічні маршрути (без автентифікації)
@@ -79,26 +106,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // Автентифікація
     Route::post('/logout', [AuthController::class, 'logout']);
     Route::get('/me', [AuthController::class, 'me']);
-    
-    // Перевірка дозволів
-    Route::get('/check-permissions', function (Request $request) {
-        $user = $request->user();
-        $permissions = [];
-        
-        if (method_exists($user, 'getPermissions')) {
-            $permissions = $user->getPermissions();
-        }
-        
-        return response()->json([
-            'user_id' => $user->id,
-            'role' => $user->role,
-            'permissions' => $permissions,
-            'can_create_course' => method_exists($user, 'hasPermission') ? $user->hasPermission('create_course') : 'method not found',
-            'can_update_course' => method_exists($user, 'hasPermission') ? $user->hasPermission('update_course') : 'method not found',
-            'can_delete_course' => method_exists($user, 'hasPermission') ? $user->hasPermission('delete_course') : 'method not found'
-        ]);
-    });
-    
+       
     // ----------------------------------------
     // Профіль користувача
     // ----------------------------------------
@@ -108,25 +116,30 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::delete('/avatar', [ProfileController::class, 'deleteAvatar']);
     });
     
-    // ----------------------------------------
-    // Користувачі
-    // ----------------------------------------
-    Route::prefix('users')->group(function () {
-        Route::get('/', [UserController::class, 'index']);
-        Route::get('/{id}', [UserController::class, 'show']);
-        Route::put('/{id}', [UserController::class, 'update']);
-        Route::delete('/{id}', [UserController::class, 'destroy']);
-        Route::get('/admins/list', [UserController::class, 'admins']);
-        Route::post('/admins', [UserController::class, 'storeAdmin']);
-    });
-    
-  
-    
-  
     // ========================================
     // Маршрути для адміністраторів
     // ========================================
-    Route::middleware([\App\Http\Middleware\CheckRole::class.':admin,super_admin'])->group(function () {
+Route::middleware([
+    'auth:sanctum',
+    \App\Http\Middleware\CheckRole::class . ':admin,super_admin'
+])->group(function () {     
+        // ----------------------------------------
+        // Користувачі (адміністрування)
+        // ----------------------------------------
+        Route::prefix('users')->group(function () {
+                // Спочатку конкретні маршрути
+                Route::get('/admins/list', [UserController::class, 'admins']);
+                Route::post('/admins', [UserController::class, 'storeAdmin']);
+                Route::post('/teachers', [UserController::class, 'storeTeacher']);
+                
+                Route::put('/{id}/change-role', [UserController::class, 'changeRole']);
+                
+                // Потім загальні маршрути
+                Route::get('/', [UserController::class, 'index']);
+                Route::get('/{id}', [UserController::class, 'show']);
+                Route::put('/{id}', [UserController::class, 'update']);
+                Route::delete('/{id}', [UserController::class, 'destroy']);   });
+       
         // ----------------------------------------
         // Категорії (адміністрування)
         // ----------------------------------------
@@ -159,7 +172,7 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::put('/{id}/publish', [CourseController::class, 'publish'])->where('id', '[0-9]+');
             Route::put('/{id}/unpublish', [CourseController::class, 'unpublish'])->where('id', '[0-9]+');
         });
-        
-
     });
+
+    
 });

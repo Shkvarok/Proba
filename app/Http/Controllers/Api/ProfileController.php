@@ -37,7 +37,7 @@ class ProfileController extends Controller
     {
         try {
             $validator = Validator::make($request->all(), [
-                'avatar' => 'required|image|mimes:jpeg,png,jpg,gif|max:2048', // Максимум 2MB
+                'avatar' => 'required|image|mimes:jpeg,png,jpg,gif|max:5120', // 5MB = 5120KB
             ]);
 
             if ($validator->fails()) {
