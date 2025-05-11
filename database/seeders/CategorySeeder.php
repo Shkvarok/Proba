@@ -191,28 +191,6 @@ class CategorySeeder extends Seeder
                 'created_at' => now(),
                 'updated_at' => now(),
             ],
-            [
-                'name' => 'Німецька',
-                'slug' => 'german',
-                'description' => 'Вивчення німецької мови',
-                'icon' => 'globe',
-                'parent_id' => $languages,
-                'position' => 2,
-                'is_active' => true,
-                'created_at' => now(),
-                'updated_at' => now(),
-            ],
-            [
-                'name' => 'Польська',
-                'slug' => 'polish',
-                'description' => 'Вивчення польської мови',
-                'icon' => 'globe',
-                'parent_id' => $languages,
-                'position' => 3,
-                'is_active' => true,
-                'created_at' => now(),
-                'updated_at' => now(),
-            ],
         ];
 
         // Вставляємо всі підкатегорії

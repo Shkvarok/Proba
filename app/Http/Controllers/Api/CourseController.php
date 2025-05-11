@@ -81,6 +81,38 @@ class CourseController extends Controller
         }
     }
 
+    public function getMyCourses()
+    {
+        $userId = auth()->id();
+        $courses = $this->courseService->getCoursesByInstructorId($userId);
+        
+        return CourseResource::collection($courses);
+    }
+    
+    /**
+     * Отримання курсів, на які записаний студент
+     */
+    public function getEnrolledCourses()
+    {
+        $userId = auth()->id();
+        $courses = $this->courseService->getEnrolledCoursesByUserId($userId);
+        
+        return CourseResource::collection($courses);
+    }
+    
+    /**
+     * Отримання прогресу по курсу
+     */
+    public function getCourseProgress($courseId)
+    {
+        $userId = auth()->id();
+        $progress = $this->courseService->getCourseProgressForUser($userId, $courseId);
+        
+        return response()->json([
+            'progress' => $progress
+        ]);
+    }
+
     /**
      * Display the specified course.
      *
