@@ -31,7 +31,7 @@ class ModuleSeeder extends Seeder
             for ($i = 1; $i <= $modulesCount; $i++) {
                 Module::create([
                     'course_id' => $course->id,
-                    'title' => "Модуль {$i}: " . $this->getRandomModuleTitle(),
+                    'title' => $this->getRandomModuleTitle(),
                     'position' => $i,
                 ]);
             }

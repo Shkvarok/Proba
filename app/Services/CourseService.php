@@ -61,11 +61,11 @@ class CourseService
     public function getCourseById(int $id): Course
     {
         $course = $this->courseRepository->findById($id);
-
+        
         if (!$course) {
             throw new Exception("Курс з ID {$id} не знайдено", 404);
         }
-
+        
         return $course;
     }
 

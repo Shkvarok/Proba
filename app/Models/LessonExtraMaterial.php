@@ -12,9 +12,11 @@ class LessonExtraMaterial extends Model
 
     protected $fillable = [
         'lesson_id',
-        'material_type',
+        'material_type', // 'text', 'url', 'file', 'image', 'video'
         'content',
         'file_path',
+        'file_type',
+        'file_name',
         'url',
     ];
 

@@ -15,7 +15,7 @@ return new class extends Migration
             $table->unsignedInteger('lesson_id');
             $table->foreign('lesson_id')->references('id')->on('lessons')->onDelete('cascade');
             
-            $table->enum('source_type', ['url', 'internal'])->default('internal');
+            $table->enum('source_type', ['url', 'internal'])->default('url');
             $table->text('external_url')->nullable();
             $table->integer('time_limit_minutes')->nullable();
             $table->integer('passing_score')->nullable();

@@ -124,7 +124,100 @@ class CourseController extends Controller
         try {
             $course = $this->courseService->getCourseById($id);
             
-            return new CourseResource($course);
+            // Створюємо структуру даних для відповіді
+            $courseData = [
+                'id' => $course->id,
+                'title' => $course->title,
+                'slug' => $course->slug,
+                'description' => $course->description,
+                'price' => $course->price,
+                'is_free' => $course->is_free,
+                'is_published' => $course->is_published,
+                'thumbnail' => $course->thumbnail,
+                'category' => $course->category ? [
+                    'id' => $course->category->id,
+                    'name' => $course->category->name,
+                    'slug' => $course->category->slug
+                ] : null,
+                'level' => $course->level ? [
+                    'id' => $course->level->id,
+                    'name' => $course->level->name
+                ] : null,
+                'instructor' => $course->instructor ? [
+                    'id' => $course->instructor->id,
+                    'name' => $course->instructor->name
+                ] : null,
+                'modules' => []
+            ];
+            
+            // Додаємо модулі з уроками
+            foreach ($course->modules as $module) {
+                $moduleData = [
+                    'id' => $module->id,
+                    'title' => $module->title,
+                    'description' => $module->description,
+                    'position' => $module->position,
+                    'lessons' => []
+                ];
+                
+                // Додаємо уроки з деталями
+                foreach ($module->lessons as $lesson) {
+                    $lessonData = [
+                        'id' => $lesson->id,
+                        'title' => $lesson->title,
+                        'description' => $lesson->description,
+                        'type' => $lesson->type,
+                        'position' => $lesson->position,
+                        'status' => $lesson->status
+                    ];
+                    
+                    // Додаємо специфічні деталі уроку в залежності від типу
+                    switch ($lesson->type) {
+                        case 'lecture':
+                            if ($lesson->lecture) {
+                                $lessonData['lecture'] = [
+                                    'id' => $lesson->lecture->id,
+                                    'content' => $lesson->lecture->content,
+                                    'duration_minutes' => $lesson->lecture->duration_minutes
+                                ];
+                            }
+                            break;
+                        
+                        case 'test':
+                            if ($lesson->test) {
+                                $lessonData['test'] = [
+                                    'id' => $lesson->test->id,
+                                    'source_type' => $lesson->test->source_type,
+                                    'external_url' => $lesson->test->external_url,
+                                    'time_limit_minutes' => $lesson->test->time_limit_minutes,
+                                    'passing_score' => $lesson->test->passing_score
+                                ];
+                            }
+                            break;
+                        
+                        case 'extra_material':
+                            if ($lesson->extraMaterial) {
+                                $lessonData['extra_material'] = [
+                                    'id' => $lesson->extraMaterial->id,
+                                    'material_type' => $lesson->extraMaterial->material_type,
+                                    'content' => $lesson->extraMaterial->content,
+                                    'file_path' => $lesson->extraMaterial->file_path,
+                                    'url' => $lesson->extraMaterial->url
+                                ];
+                            }
+                            break;
+                    }
+                    
+                    $moduleData['lessons'][] = $lessonData;
+                }
+                
+                $courseData['modules'][] = $moduleData;
+            }
+            
+            return response()->json([
+                'success' => true,
+                'course' => $courseData
+            ]);
         } catch (Exception $e) {
             return response()->json([
                 'success' => false,

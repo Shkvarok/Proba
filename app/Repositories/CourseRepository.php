@@ -41,12 +41,24 @@ class CourseRepository
      * @param int $id
      * @return Course|null
      */    public function findById(int $id): ?Course
-    {
-        // Виправлення: замість find() використовуємо first()
-        return Course::with(['category', 'level', 'instructor'])
-            ->where('id', $id)
-            ->first();
-    }
+{
+    return Course::with([
+        'category', 
+        'level', 
+        'instructor',
+        'modules' => function($query) {
+            $query->orderBy('position');
+        },
+        'modules.lessons' => function($query) {
+            $query->orderBy('position');
+        },
+        'modules.lessons.lecture',
+        'modules.lessons.test',
+        'modules.lessons.extraMaterial'
+    ])
+    ->where('id', $id)
+    ->first();
+}
 
     /**
      * Get courses by category.
