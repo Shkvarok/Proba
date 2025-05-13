@@ -141,7 +141,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // ----------------------------------------
     Route::middleware([\App\Http\Middleware\CheckRole::class . ':teacher,admin,super_admin'])->group(function () {
         // Управління курсами
-        Route::prefix('courses/manage')->group(function () {
+        Route::prefix('courses')->group(function () {
             Route::get('/', [CourseController::class, 'getMyCourses']);
             Route::post('/', [CourseController::class, 'store']);
             Route::put('/{id}', [CourseController::class, 'update'])->where('id', '[0-9]+');

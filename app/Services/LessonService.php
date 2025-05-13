@@ -96,7 +96,7 @@ class LessonService
                 LessonTest::create($testData);
                 break;
             
-            case 'extra_material':
+           case 'extra_material':
                 $materialData = [
                     'lesson_id' => $lesson->id,
                     'material_type' => $data['material_type'] ?? 'text',
@@ -112,9 +112,16 @@ class LessonService
                     case 'file':
                     case 'image':
                     case 'video':
-                        $materialData['file_path'] = $data['file_path'] ?? null;
-                        $materialData['file_type'] = $data['file_type'] ?? null;
-                        $materialData['file_name'] = $data['file_name'] ?? null;
+                        // Перевіряємо різні можливі варіанти ключів
+                        if (isset($data['material_file_path'])) {
+                            $materialData['file_path'] = $data['material_file_path'];
+                            $materialData['file_type'] = $data['material_file_type'] ?? null;
+                            $materialData['file_name'] = $data['material_file_name'] ?? null;
+                        } elseif (isset($data['file_path'])) {
+                            $materialData['file_path'] = $data['file_path'];
+                            $materialData['file_type'] = $data['file_type'] ?? null;
+                            $materialData['file_name'] = $data['file_name'] ?? null;
+                        }
                         break;
                 }
                 

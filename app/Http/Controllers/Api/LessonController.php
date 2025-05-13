@@ -95,7 +95,7 @@ public function store(Request $request)
         $data = $request->all();
         
         // Обробка файлу для лекції
-        if ($request->hasFile('file')) {
+        if ($request->hasFile('file') && $request->type === 'lecture') {
             $file = $request->file('file');
             $fileName = time() . '_' . $file->getClientOriginalName();
             $filePath = $file->storeAs('lessons/lectures', $fileName, 'public');
@@ -105,7 +105,7 @@ public function store(Request $request)
         }
         
         // Обробка файлу для додаткового матеріалу
-        if ($request->hasFile('material_file')) {
+        if ($request->hasFile('material_file') && $request->type === 'extra_material') {
             $file = $request->file('material_file');
             $fileName = time() . '_' . $file->getClientOriginalName();
             $filePath = $file->storeAs('lessons/materials', $fileName, 'public');
@@ -171,10 +171,11 @@ public function update(Request $request, $id)
         'status' => 'nullable|in:active,disabled',
         
         // Спільні поля для лекцій
-        'content' => 'nullable|string',
         'duration_minutes' => 'nullable|integer|min:1',
-        'file' => 'nullable|file|max:10240', // Для завантаження файлу лекції
-        
+        // Змінити валідацію на:
+        'file' => 'nullable|file|max:10240|required_without_all:content|required_if:type,lecture,content,null',
+        'content' => 'nullable|string|required_without_all:file|required_if:type,lecture,file,null',
+
         // Поля для тестів
         'source_type' => 'nullable|in:url,internal',
         'external_url' => 'nullable|url',
