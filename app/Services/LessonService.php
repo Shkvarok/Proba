@@ -132,6 +132,79 @@ class LessonService
         return $lesson->fresh(['lecture', 'test', 'extraMaterial']);
     });
 }
+
+/**
+ * Пряме оновлення уроку - простіший метод для надійного оновлення
+ *
+ * @param int $id
+ * @param array $data
+ * @return Lesson
+ */
+public function directUpdateLesson(int $id, array $data): Lesson
+{
+    return DB::transaction(function () use ($id, $data) {
+        // Отримуємо урок
+        $lesson = Lesson::findOrFail($id);
+        
+        // Логуємо отримані дані
+        \Illuminate\Support\Facades\Log::info('Дані для оновлення уроку:', $data);
+        
+        // Оновлюємо базові дані уроку
+        if (isset($data['title'])) $lesson->title = $data['title'];
+        if (isset($data['description'])) $lesson->description = $data['description'];
+        if (isset($data['status'])) $lesson->status = $data['status'];
+        
+        // Обробка позиції, якщо вона змінюється
+        if (isset($data['position']) && $data['position'] != $lesson->position) {
+            $oldPosition = $lesson->position;
+            $newPosition = $data['position'];
+            $moduleId = $lesson->module_id;
+            
+            // Визначаємо максимальну позицію
+            $maxPosition = Lesson::where('module_id', $moduleId)->count();
+            
+            // Обмежуємо позицію максимальним значенням
+            if ($newPosition > $maxPosition) {
+                $newPosition = $maxPosition;
+            }
+            
+            // Зміщуємо інші уроки
+            if ($newPosition > $oldPosition) {
+                Lesson::where('module_id', $moduleId)
+                    ->where('position', '>', $oldPosition)
+                    ->where('position', '<=', $newPosition)
+                    ->decrement('position');
+            } else {
+                Lesson::where('module_id', $moduleId)
+                    ->where('position', '>=', $newPosition)
+                    ->where('position', '<', $oldPosition)
+                    ->increment('position');
+            }
+            
+            $lesson->position = $newPosition;
+        }
+        
+        // Зберігаємо оновлений урок
+        $lesson->save();
+        
+        // Оновлюємо пов'язані дані залежно від типу уроку
+        if ($lesson->type === 'lecture' && isset($data['lecture_data'])) {
+            $lecture = $lesson->lecture ?? LessonLecture::create(['lesson_id' => $lesson->id]);
+            
+            // Оновлюємо дані лекції
+            foreach ($data['lecture_data'] as $key => $value) {
+                $lecture->{$key} = $value;
+            }
+            
+            $lecture->save();
+        }
+        
+        // Інші типи уроків...
+        
+        // Повертаємо свіжі дані уроку
+        return $lesson->fresh(['lecture', 'test', 'extraMaterial']);
+    });
+}
     /**
  * Оновлення уроку та його деталей
  *
@@ -145,6 +218,9 @@ public function updateLesson(int $id, array $data): Lesson
         $lesson = Lesson::findOrFail($id);
         $moduleId = $lesson->module_id;
         $oldPosition = $lesson->position;
+        
+        // Логування вхідних даних
+        \Illuminate\Support\Facades\Log::debug('Вхідні дані для оновлення уроку:', $data);
         
         // Якщо змінюється позиція, коригуємо інші уроки
         if (isset($data['position']) && $data['position'] != $oldPosition) {
@@ -191,19 +267,41 @@ public function updateLesson(int $id, array $data): Lesson
                     'duration_minutes' => $data['duration_minutes'] ?? $lecture->duration_minutes,
                 ];
                 
-                // Оновлення текстового контенту
-                if (isset($data['content'])) {
-                    $lectureData['content'] = $data['content'];
-                    $lectureData['content_type'] = 'text';
+                // Визначаємо тип контенту
+                if (isset($data['content_type'])) {
+                    $lectureData['content_type'] = $data['content_type'];
                 }
                 
-                // Оновлення файлу
-                if (isset($data['file_path'])) {
-                    $lectureData['content_type'] = 'file';
-                    $lectureData['file_path'] = $data['file_path'];
-                    $lectureData['file_type'] = $data['file_type'] ?? null;
-                    $lectureData['file_name'] = $data['file_name'] ?? null;
+                // Оновлення контенту відповідно до типу
+                if (isset($data['content_type']) && $data['content_type'] === 'text') {
+                    // Якщо текстовий контент
+                    $lectureData['content'] = $data['content'] ?? $lecture->content;
+                    $lectureData['file_path'] = null;
+                    $lectureData['file_type'] = null;
+                    $lectureData['file_name'] = null;
+                } elseif (isset($data['content_type']) && $data['content_type'] === 'file') {
+                    // Якщо файловий контент
+                    $lectureData['content'] = null;
+                    $lectureData['file_path'] = $data['file_path'] ?? $lecture->file_path;
+                    $lectureData['file_type'] = $data['file_type'] ?? $lecture->file_type;
+                    $lectureData['file_name'] = $data['file_name'] ?? $lecture->file_name;
+                } else {
+                    // Інакше зберігаємо те, що є
+                    if (isset($data['content'])) {
+                        $lectureData['content'] = $data['content'];
+                        $lectureData['content_type'] = 'text';
+                    }
+                    
+                    if (isset($data['file_path'])) {
+                        $lectureData['file_path'] = $data['file_path'];
+                        $lectureData['file_type'] = $data['file_type'] ?? null;
+                        $lectureData['file_name'] = $data['file_name'] ?? null;
+                        $lectureData['content_type'] = 'file';
+                    }
                 }
+                
+                // Логування даних лекції перед оновленням
+                \Illuminate\Support\Facades\Log::debug('Дані для оновлення лекції:', $lectureData);
                 
                 $lecture->update($lectureData);
                 break;
@@ -233,45 +331,39 @@ public function updateLesson(int $id, array $data): Lesson
                 ];
                 
                 // Оновлення в залежності від типу матеріалу
-                if (isset($data['material_type'])) {
-                    $materialType = $data['material_type'];
-                    
-                    switch ($materialType) {
-                        case 'text':
-                            if (isset($data['material_content'])) {
-                                $materialData['content'] = $data['material_content'];
-                            }
-                            break;
-                            
-                        case 'url':
-                            if (isset($data['material_url'])) {
-                                $materialData['url'] = $data['material_url'];
-                            }
-                            break;
-                            
-                        case 'file':
-                        case 'image':
-                        case 'video':
-                            if (isset($data['file_path'])) {
-                                $materialData['file_path'] = $data['file_path'];
-                                $materialData['file_type'] = $data['file_type'] ?? null;
-                                $materialData['file_name'] = $data['file_name'] ?? null;
-                            }
-                            break;
-                    }
-                } else {
-                    // Обробка полів не змінюючи тип матеріалу
-                    $materialType = $material->material_type;
-                    
-                    if ($materialType === 'text' && isset($data['material_content'])) {
-                        $materialData['content'] = $data['material_content'];
-                    } elseif ($materialType === 'url' && isset($data['material_url'])) {
-                        $materialData['url'] = $data['material_url'];
-                    } elseif (in_array($materialType, ['file', 'image', 'video']) && isset($data['file_path'])) {
-                        $materialData['file_path'] = $data['file_path'];
-                        $materialData['file_type'] = $data['file_type'] ?? null;
-                        $materialData['file_name'] = $data['file_name'] ?? null;
-                    }
+                $materialType = $data['material_type'] ?? $material->material_type;
+                
+                switch ($materialType) {
+                    case 'text':
+                        $materialData['content'] = $data['material_content'] ?? $material->content;
+                        // Очищаємо дані файлу і URL при зміні типу
+                        $materialData['file_path'] = null;
+                        $materialData['file_type'] = null;
+                        $materialData['file_name'] = null;
+                        $materialData['url'] = null;
+                        break;
+                        
+                    case 'url':
+                        $materialData['url'] = $data['material_url'] ?? $material->url;
+                        // Очищаємо дані файлу і контенту при зміні типу
+                        $materialData['file_path'] = null;
+                        $materialData['file_type'] = null;
+                        $materialData['file_name'] = null;
+                        $materialData['content'] = null;
+                        break;
+                        
+                    case 'file':
+                    case 'image':
+                    case 'video':
+                        if (isset($data['file_path'])) {
+                            $materialData['file_path'] = $data['file_path'];
+                            $materialData['file_type'] = $data['file_type'] ?? null;
+                            $materialData['file_name'] = $data['file_name'] ?? null;
+                            // Очищаємо контент і URL при зміні типу
+                            $materialData['content'] = null;
+                            $materialData['url'] = null;
+                        }
+                        break;
                 }
                 
                 $material->update($materialData);
