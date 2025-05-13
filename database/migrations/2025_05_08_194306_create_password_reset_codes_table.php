@@ -16,7 +16,7 @@ return new class extends Migration
             $table->string('email')->index();
             $table->string('code');
             $table->timestamp('created_at')->useCurrent();
-            $table->timestamp('expires_at')->useCurrent();
+            $table->timestamp('expires_at')->useCurrent()->nullable(); // Додано nullable() або значення за замовчуванням
         });
     }
 
