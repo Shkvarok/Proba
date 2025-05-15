@@ -14,11 +14,11 @@ class CourseRepository
      * @param int $perPage
      * @return LengthAwarePaginator
      */
+// Змініть метод getAllPaginated в CourseRepository
     public function getAllPaginated(int $perPage = 15): LengthAwarePaginator
     {
-        return Course::with(['category', 'level', 'instructor'])
-            ->latest()
-            ->paginate($perPage);
+        // Тимчасово видаліть eager loading або обмежте його
+        return Course::latest()->take(10)->paginate($perPage);
     }
 
     /**

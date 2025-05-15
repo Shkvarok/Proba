@@ -38,8 +38,14 @@ class CourseController extends Controller
     public function index(Request $request)
     {
         try {
+            \Log::info('Початок виконання методу index');
             $perPage = $request->input('per_page', 15);
             $onlyPublished = $request->boolean('published', false);
+            
+            \Log::info('Параметри запиту', [
+                'perPage' => $perPage,
+                'onlyPublished' => $onlyPublished
+            ]);
             
             if ($onlyPublished) {
                 $courses = $this->courseService->getPublishedCourses($perPage);
@@ -47,8 +53,14 @@ class CourseController extends Controller
                 $courses = $this->courseService->getAllCourses($perPage);
             }
             
+            \Log::info('Курси отримано успішно');
             return CourseResource::collection($courses);
         } catch (Exception $e) {
+            \Log::error('Помилка в методі index', [
+                'message' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            
             return response()->json([
                 'success' => false,
                 'message' => 'Помилка при отриманні списку курсів: ' . $e->getMessage()

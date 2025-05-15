@@ -136,4 +136,24 @@ class Course extends Model
     {
         return $this->hasMany(Module::class);
     }
+
+    /**
+ * Підписки на цей курс
+ */
+public function enrollments()
+{
+    return $this->hasMany(CourseEnrollment::class);
+}
+
+/**
+ * Користувачі, підписані на цей курс
+ */
+    public function enrolledUsers()
+    {
+        return $this->belongsToMany(User::class, 'course_enrollments')
+            ->withPivot(['enrolled_at', 'expires_at', 'enrollment_type', 'is_active'])
+            ->wherePivot('is_active', true)
+            ->wherePivotNull('expires_at')
+            ->orWherePivot('expires_at', '>', now());
+    }
 }

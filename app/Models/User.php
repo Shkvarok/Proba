@@ -9,6 +9,7 @@ use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
 
+
 class User extends Authenticatable
 {
     use HasApiTokens, HasFactory, Notifiable, SoftDeletes;
@@ -99,5 +100,35 @@ class User extends Authenticatable
     public function isAdmin(): bool
     {
         return $this->hasAnyRole(['admin', 'super_admin']);
+    }
+
+    /**
+     * Підписки користувача на курси
+     */
+    public function courseEnrollments()
+    {
+        return $this->hasMany(CourseEnrollment::class);
+    }
+
+    /**
+     * Платежі користувача
+     */
+    public function payments()
+    {
+        return $this->hasMany(Payment::class);
+    }
+
+    /**
+     * Доступні курси користувача
+     */
+    public function enrolledCourses()
+    {
+        return $this->belongsToMany(Course::class, 'course_enrollments')
+            ->withPivot(['enrolled_at', 'expires_at', 'enrollment_type', 'is_active'])
+            ->wherePivot('is_active', true)
+            ->where(function ($query) {
+                $query->wherePivot('expires_at', null)
+                      ->orWherePivot('expires_at', '>', now());
+            });
     }
 }
