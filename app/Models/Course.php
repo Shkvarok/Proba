@@ -136,14 +136,14 @@ class Course extends Model
     {
         return $this->hasMany(Module::class);
     }
-
-    /**
+    
+/**
  * Підписки на цей курс
  */
-public function enrollments()
-{
-    return $this->hasMany(CourseEnrollment::class);
-}
+    public function enrollments()
+    {
+        return $this->hasMany(CourseEnrollment::class);
+    }
 
 /**
  * Користувачі, підписані на цей курс
@@ -155,5 +155,36 @@ public function enrollments()
             ->wherePivot('is_active', true)
             ->wherePivotNull('expires_at')
             ->orWherePivot('expires_at', '>', now());
+    }
+/**
+ * Отримати відгуки до курсу
+ */
+    public function reviews()
+    {
+        return $this->hasMany(Review::class);
+    }
+
+/**
+ * Отримати схвалені відгуки до курсу
+ */
+    public function approvedReviews()
+    {
+        return $this->reviews()->approved();
+    }
+
+/**
+ * Отримати середній рейтинг курсу
+ */
+    public function getAverageRatingAttribute()
+    {
+        return $this->approvedReviews()->avg('rating') ?: 0;
+    }
+
+/**
+ * Отримати кількість відгуків до курсу
+ */
+    public function getReviewsCountAttribute()
+    {
+        return $this->approvedReviews()->count();
     }
 }

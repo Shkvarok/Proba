@@ -68,7 +68,7 @@ class LessonController extends Controller
             'file' => [
                 'nullable',
                 'file',
-                'max:10240',
+                'max:1024000',
                 Rule::requiredIf(function () use ($request) {
                     return $request->type === 'lecture' && empty($request->content);
                 }),
@@ -90,7 +90,7 @@ class LessonController extends Controller
             
             // Поля для додаткових матеріалів
             'material_type' => 'nullable|in:url,video,file,text,image|required_if:type,extra_material',
-            'material_file' => 'nullable|file|max:102400|required_if:material_type,file,image,video',
+            'material_file' => 'nullable|file|max:1024000|required_if:material_type,file,image,video',
             'material_url' => 'nullable|url|required_if:material_type,url',
             'material_content' => 'nullable|string|required_if:material_type,text',
         ]);

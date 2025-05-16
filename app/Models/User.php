@@ -131,4 +131,19 @@ class User extends Authenticatable
                       ->orWherePivot('expires_at', '>', now());
             });
     }
+    /**
+ * Отримати відгуки користувача
+ */
+public function reviews()
+{
+    return $this->hasMany(Review::class);
+}
+
+/**
+ * Отримати коментарі користувача до відгуків
+ */
+public function reviewComments()
+{
+    return $this->hasMany(ReviewComment::class);
+}
 }

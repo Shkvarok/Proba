@@ -163,13 +163,19 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/course/{courseId}/success', [PaymentController::class, 'paymentSuccess'])->name('courses.payment.success');
     });
     Route::get('/test-payment-callback/{paymentId}', [PaymentController::class, 'testProcessCallback']);
+    
+    
+    // Отримання відгуків для курсу
+    Route::get('/courses/{courseId}/reviews', [App\Http\Controllers\Api\ReviewController::class, 'getCourseReviews']);
+
     // ----------------------------------------
     // Доступ до вмісту курсів (з перевіркою доступу)
     // ----------------------------------------
     Route::middleware('check.course.access')->group(function () {
-        Route::get('/courses/{courseId}/modules', [ModuleController::class, 'getModulesByCourse']);
-        Route::get('/courses/{courseId}/modules/{moduleId}/lessons', [LessonController::class, 'getLessonsByModule']);
-        // Інші маршрути доступу до вмісту курсу...
+        Route::prefix('lern')->group(function () {
+            Route::get('/courses/{courseId}/modules', [ModuleController::class, 'getModulesByCourse']);
+            Route::get('/courses/{courseId}/modules/{moduleId}/lessons', [LessonController::class, 'getLessonsByModule']);
+        });
     });
     
     // ----------------------------------------
@@ -244,5 +250,39 @@ Route::middleware('auth:sanctum')->group(function () {
         
         // Статистика платежів (якщо потрібно)
         Route::get('/admin/payment-stats', [PaymentController::class, 'getPaymentStats']);
+    });
+});
+
+Route::middleware('auth:sanctum')->group(function () {
+    // Маршрути для відгуків, доступні користувачам із доступом до курсу
+    Route::prefix('reviews')->group(function () {
+     // Додати відгук до курсу (тільки для користувачів, що мають доступ до курсу)
+        Route::post('/course/{courseId}', [App\Http\Controllers\Api\ReviewController::class, 'storeReview'])
+            ->middleware('check.course.review.access');
+        // Оновити свій відгук
+        Route::put('/{reviewId}', [App\Http\Controllers\Api\ReviewController::class, 'updateReview']);
+        
+        // Видалити свій відгук
+        Route::delete('/{reviewId}', [App\Http\Controllers\Api\ReviewController::class, 'deleteReview']);
+        
+        // Коментарі до відгуків
+        Route::post('/{reviewId}/comments', [App\Http\Controllers\Api\ReviewController::class, 'storeComment']);
+        Route::put('/comments/{commentId}', [App\Http\Controllers\Api\ReviewController::class, 'updateComment']);
+        Route::delete('/comments/{commentId}', [App\Http\Controllers\Api\ReviewController::class, 'deleteComment']);
+    });
+    
+    // Маршрути для модерації відгуків (тільки для адміністраторів)
+    Route::middleware([\App\Http\Middleware\CheckRole::class . ':admin,super_admin'])->group(function () {
+        Route::prefix('moderation')->group(function () {
+            // Отримання списків відгуків і коментарів, які очікують модерації
+            Route::get('/reviews/pending', [App\Http\Controllers\Api\ReviewController::class, 'getPendingReviews']);
+            Route::get('/comments/pending', [App\Http\Controllers\Api\ReviewController::class, 'getPendingComments']);
+            
+            // Схвалення/відхилення відгуків і коментарів
+            Route::put('/reviews/{reviewId}/approve', [App\Http\Controllers\Api\ReviewController::class, 'approveReview']);
+            Route::put('/comments/{commentId}/approve', [App\Http\Controllers\Api\ReviewController::class, 'approveComment']);
+            Route::delete('/reviews/{reviewId}/reject', [App\Http\Controllers\Api\ReviewController::class, 'rejectReview']);
+            Route::delete('/comments/{commentId}/reject', [App\Http\Controllers\Api\ReviewController::class, 'rejectComment']);
+        });
     });
 });
