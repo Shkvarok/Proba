@@ -52,6 +52,7 @@ Route::get('/migrate-fresh', function () {
     return response()->json(['message' => 'Database has been refreshed and migrations have been re-run.']);
 })->name('migrate.fresh');
 
+
 // ========================================
 // ПУБЛІЧНІ МАРШРУТИ (БЕЗ АВТЕНТИФІКАЦІЇ)
 // ========================================
@@ -162,6 +163,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/{paymentId}/status', [PaymentController::class, 'checkPaymentStatus']);
         Route::get('/course/{courseId}/success', [PaymentController::class, 'paymentSuccess'])->name('courses.payment.success');
     });
+    // Тестова відповідь для обробки платежів які оплатили через LiqPay
     Route::get('/test-payment-callback/{paymentId}', [PaymentController::class, 'testProcessCallback']);
     
     
@@ -182,6 +184,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // Для викладачів та адміністраторів
     // ----------------------------------------
     Route::middleware([\App\Http\Middleware\CheckRole::class . ':teacher,admin,super_admin'])->group(function () {
+        
         // Управління курсами
         Route::prefix('courses/manage')->group(function () {
             Route::get('/', [CourseController::class, 'getMyCourses']);
@@ -258,7 +261,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::prefix('reviews')->group(function () {
      // Додати відгук до курсу (тільки для користувачів, що мають доступ до курсу)
         Route::post('/course/{courseId}', [App\Http\Controllers\Api\ReviewController::class, 'storeReview'])
-            ->middleware('check.course.review.access');
+            ->middleware(\App\Http\Middleware\CheckCourseReviewAccess::class);
         // Оновити свій відгук
         Route::put('/{reviewId}', [App\Http\Controllers\Api\ReviewController::class, 'updateReview']);
         
@@ -274,6 +277,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // Маршрути для модерації відгуків (тільки для адміністраторів)
     Route::middleware([\App\Http\Middleware\CheckRole::class . ':admin,super_admin'])->group(function () {
         Route::prefix('moderation')->group(function () {
+
             // Отримання списків відгуків і коментарів, які очікують модерації
             Route::get('/reviews/pending', [App\Http\Controllers\Api\ReviewController::class, 'getPendingReviews']);
             Route::get('/comments/pending', [App\Http\Controllers\Api\ReviewController::class, 'getPendingComments']);
