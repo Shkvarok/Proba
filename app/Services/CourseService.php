@@ -8,8 +8,10 @@ use Illuminate\Http\UploadedFile;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Log;
 use Exception;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 
 class CourseService
 {
@@ -114,6 +116,12 @@ class CourseService
      */
      public function createCourse(array $data, ?UploadedFile $coverImage = null): Course
     {
+    // Логування даних перед створенням
+        \Log::info('CourseService::createCourse called with data:', $data);
+        
+        // Переконуємося що thumbnail включений в fillable поля моделі
+        $course = Course::create($data);
+
         // Обробка зображення обкладинки
         if ($coverImage) {
             $data['cover_image'] = $this->uploadCoverImage($coverImage);
@@ -138,6 +146,13 @@ class CourseService
             // В іншому випадку (для вчителів), автор - це поточний користувач
             $data['instructor_id'] = auth()->id();
         }
+
+        // Логування після створення
+        Log::info('Course created in database:', [
+            'id' => $course->id,
+            'cover_image' => $course->cover_image,  // ← На це
+            'all_attributes' => $course->toArray()
+        ]);
         
         return Course::create($data);
     }
@@ -328,55 +343,205 @@ class CourseService
         $completedLessons = 0;
         $progress = $totalLessons > 0 ? round($completedLessons / $totalLessons * 100, 2) : 0;
         
+    return [
+        'course_id' => $courseId,
+        'user_id' => $userId,
+        'total_lessons' => $totalLessons,
+        'completed_lessons' => $completedLessons,
+        'progress_percentage' => $progress,
+        'started_at' => null,
+        'last_activity_at' => null
+    ];
+    
+    // Закоментуйте код вище і розкоментуйте цей, коли створите
+    // необхідні таблиці для відстеження прогресу:
+    
+    /*
+    $progress = UserCourseProgress::where('user_id', $userId)
+        ->where('course_id', $courseId)
+        ->first();
+        
+    if (!$progress) {
+        // Якщо запис прогресу не знайдено, створюємо новий
+        $course = Course::with(['modules.lessons'])->findOrFail($courseId);
+        
+        // Підраховуємо загальну кількість уроків
+        $totalLessons = 0;
+        foreach ($course->modules as $module) {
+            $totalLessons += $module->lessons->count();
+        }
+        
         return [
             'course_id' => $courseId,
             'user_id' => $userId,
             'total_lessons' => $totalLessons,
-            'completed_lessons' => $completedLessons,
-            'progress_percentage' => $progress,
+            'completed_lessons' => 0,
+            'progress_percentage' => 0,
             'started_at' => null,
             'last_activity_at' => null
         ];
-        
-        // Закоментуйте код вище і розкоментуйте цей, коли створите
-        // необхідні таблиці для відстеження прогресу:
-        
-        /*
-        $progress = UserCourseProgress::where('user_id', $userId)
-            ->where('course_id', $courseId)
-            ->first();
-            
-        if (!$progress) {
-            // Якщо запис прогресу не знайдено, створюємо новий
-            $course = Course::with(['modules.lessons'])->findOrFail($courseId);
-            
-            // Підраховуємо загальну кількість уроків
-            $totalLessons = 0;
-            foreach ($course->modules as $module) {
-                $totalLessons += $module->lessons->count();
-            }
-            
-            return [
-                'course_id' => $courseId,
-                'user_id' => $userId,
-                'total_lessons' => $totalLessons,
-                'completed_lessons' => 0,
-                'progress_percentage' => 0,
-                'started_at' => null,
-                'last_activity_at' => null
-            ];
-        }
-        
-        // Інакше повертаємо існуючий прогрес
-        return [
-            'course_id' => $progress->course_id,
-            'user_id' => $progress->user_id,
-            'total_lessons' => $progress->total_lessons,
-            'completed_lessons' => $progress->completed_lessons,
-            'progress_percentage' => $progress->completion_percentage,
-            'started_at' => $progress->started_at,
-            'last_activity_at' => $progress->last_accessed_at
-        ];
-        */
     }
+    
+    // Інакше повертаємо існуючий прогрес
+    return [
+        'course_id' => $progress->course_id,
+        'user_id' => $progress->user_id,
+        'total_lessons' => $progress->total_lessons,
+        'completed_lessons' => $progress->completed_lessons,
+        'progress_percentage' => $progress->completion_percentage,
+        'started_at' => $progress->started_at,
+        'last_activity_at' => $progress->last_accessed_at
+    ];
+    */
+}
+
+public function searchCoursesWithFilters(string $query, int $perPage = 15, array $filters = [])
+{
+    $queryBuilder = Course::query()
+        ->with(['category', 'level', 'instructor'])
+        ->where('is_published', true);
+
+    // Пошук по назві та опису
+    $queryBuilder->where(function ($q) use ($query) {
+        $q->where('title', 'LIKE', "%{$query}%")
+        ->orWhere('description', 'LIKE', "%{$query}%")
+        ->orWhere('requirements', 'LIKE', "%{$query}%")
+        ->orWhere('what_you_learn', 'LIKE', "%{$query}%");
+    });
+
+    // Застосування фільтрів
+    if (!empty($filters['category_id'])) {
+        $queryBuilder->where('category_id', $filters['category_id']);
+    }
+
+    if (!empty($filters['level_id'])) {
+        $queryBuilder->where('level_id', $filters['level_id']);
+    }
+
+    if (!empty($filters['is_free'])) {
+        if ($filters['is_free']) {
+            $queryBuilder->where('is_free', true);
+        } else {
+            $queryBuilder->where('is_free', false);
+        }
+    }
+
+    if (!empty($filters['price_min'])) {
+        $queryBuilder->where('price', '>=', $filters['price_min']);
+    }
+
+    if (!empty($filters['price_max'])) {
+        $queryBuilder->where('price', '<=', $filters['price_max']);
+    }
+
+    if (!empty($filters['instructor_id'])) {
+        $queryBuilder->where('instructor_id', $filters['instructor_id']);
+    }
+
+    if (!empty($filters['language'])) {
+        $queryBuilder->where('language', $filters['language']);
+    }
+
+    if (!empty($filters['difficulty_level'])) {
+        $queryBuilder->where('difficulty_level', $filters['difficulty_level']);
+    }
+
+    // Сортування
+    $sortBy = $filters['sort_by'] ?? 'created_at';
+    $sortDirection = $filters['sort_direction'] ?? 'desc';
+    
+    $allowedSortFields = ['created_at', 'title', 'price', 'updated_at'];
+    if (in_array($sortBy, $allowedSortFields)) {
+        $queryBuilder->orderBy($sortBy, $sortDirection);
+    }
+
+    return $queryBuilder->paginate($perPage);
+}
+
+/**
+ * Get popular courses
+ */
+public function getPopularCourses(int $limit = 10)
+{
+    return Course::query()
+        ->with(['category', 'level', 'instructor'])
+        ->where('is_published', true)
+        ->withCount('enrollments')
+        ->orderBy('enrollments_count', 'desc')
+        ->limit($limit)
+        ->get();
+}
+
+/**
+ * Get featured courses
+ */
+public function getFeaturedCourses(int $limit = 6)
+{
+    return Course::query()
+        ->with(['category', 'level', 'instructor'])
+        ->where('is_published', true)
+        ->where('is_featured', true) // Припускаємо, що у вас є поле is_featured
+        ->orderBy('created_at', 'desc')
+        ->limit($limit)
+        ->get();
+}
+
+/**
+ * Get courses statistics
+ */
+public function getCoursesStatistics()
+{
+    return [
+        'total_courses' => Course::count(),
+        'published_courses' => Course::where('is_published', true)->count(),
+        'free_courses' => Course::where('is_free', true)->count(),
+        'paid_courses' => Course::where('is_free', false)->count(),
+        'courses_by_category' => Course::select('category_id')
+            ->with('category:id,name')
+            ->groupBy('category_id')
+            ->get()
+            ->groupBy('category.name')
+            ->map->count(),
+        'courses_by_level' => Course::select('level_id')
+            ->with('level:id,name')
+            ->groupBy('level_id')
+            ->get()
+            ->groupBy('level.name')
+            ->map->count(),
+    ];
+}
+
+/**
+ * Get recommended courses for user
+ */
+public function getRecommendedCourses(int $userId, int $limit = 5)
+{
+    // Отримуємо категорії курсів, на які користувач вже записаний
+    $userCategoryIds = Course::query()
+        ->join('course_enrollments', 'courses.id', '=', 'course_enrollments.course_id')
+        ->where('course_enrollments.user_id', $userId)
+        ->pluck('courses.category_id')
+        ->unique();
+
+    if ($userCategoryIds->isEmpty()) {
+        // Якщо користувач ще не записаний на курси, повертаємо популярні
+        return $this->getPopularCourses($limit);
+    }
+
+    // Знаходимо курси з тих же категорій, на які користувач ще не записаний
+    return Course::query()
+        ->with(['category', 'level', 'instructor'])
+        ->where('is_published', true)
+        ->whereIn('category_id', $userCategoryIds)
+        ->whereNotExists(function ($query) use ($userId) {
+            $query->select(DB::raw(1))
+                ->from('course_enrollments')
+                ->whereColumn('course_enrollments.course_id', 'courses.id')
+                ->where('course_enrollments.user_id', $userId);
+        })
+        ->withCount('enrollments')
+        ->orderBy('enrollments_count', 'desc')
+        ->limit($limit)
+        ->get();
+}
 }

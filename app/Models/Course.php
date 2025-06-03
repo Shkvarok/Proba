@@ -17,7 +17,7 @@ class Course extends Model
      *
      * @var array<int, string>
      */
-    protected $fillable = [
+   protected $fillable = [
         'title',
         'description',
         'category_id',
@@ -27,13 +27,13 @@ class Course extends Model
         'discount_expires_at',
         'level_id',
         'language',
-        'cover_image',
+        'cover_image',        // ← Використовуємо cover_image
         'promo_video_url',
         'requirements',
         'what_you_learn',
         'is_published',
         'meta_title',
-        'meta_description',
+        'meta_description'
     ];
 
     /**
@@ -48,7 +48,7 @@ class Course extends Model
         'is_published' => 'boolean',
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
-        'deleted_at' => 'datetime',
+        'deleted_at' => 'datetime'
     ];
 
     /**
