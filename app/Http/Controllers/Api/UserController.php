@@ -8,6 +8,7 @@ use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Facades\Log;
 
 class UserController extends Controller
 {
@@ -297,34 +298,155 @@ class UserController extends Controller
      */
     public function changeRole(Request $request, $id)
     {
-        $validator = Validator::make($request->all(), [
-            'role_id' => 'required|exists:roles,id',
-        ]);
+        try {
+            Log::info('UserController@changeRole: Початок методу', [
+                'user_id' => $id,
+                'request_data' => $request->all(),
+                'auth_user_id' => auth()->id(),
+                'auth_user_role' => auth()->user()->role ? auth()->user()->role->name : null
+            ]);
 
-        if ($validator->fails()) {
+            $validator = Validator::make($request->all(), [
+                'role_name' => 'required|string|in:user,teacher,admin,super_admin',
+            ]);
+
+            if ($validator->fails()) {
+                Log::warning('UserController@changeRole: Помилка валідації', [
+                    'errors' => $validator->errors()->toArray()
+                ]);
+                
+                return response()->json([
+                    'message' => 'Помилка валідації даних',
+                    'errors' => $validator->errors()
+                ], 422);
+            }
+
+            // Знаходимо користувача, якому змінюємо роль
+            $user = User::with('role')->findOrFail($id);
+            
+            // Отримуємо аутентифікованого користувача з роллю
+            $authUser = auth()->user();
+            if (!$authUser->relationLoaded('role')) {
+                $authUser->load('role');
+            }
+
+            $authUserRole = $authUser->role ? $authUser->role->name : null;
+            $requestedRoleName = $request->role_name;
+
+            Log::info('UserController@changeRole: Дані для перевірки', [
+                'target_user_id' => $user->id,
+                'target_user_current_role' => $user->role ? $user->role->name : null,
+                'auth_user_role' => $authUserRole,
+                'requested_role' => $requestedRoleName
+            ]);
+
+            // Заборона змінювати роль самому собі
+            if ($authUser->id == $user->id) {
+                return response()->json([
+                    'message' => 'Ви не можете змінити власну роль'
+                ], 403);
+            }
+
+            // Перевірки дозволів залежно від ролі аутентифікованого користувача
+            if ($authUserRole === 'super_admin') {
+                // Супер адмін може змінити роль на будь-яку
+                Log::info('UserController@changeRole: Супер адмін має повні права');
+                
+            } elseif ($authUserRole === 'admin') {
+                // Адміністратор може змінити роль тільки на teacher або user
+                if (in_array($requestedRoleName, ['super_admin', 'admin'])) {
+                    Log::warning('UserController@changeRole: Адмін намагається призначити заборонену роль', [
+                        'requested_role' => $requestedRoleName
+                    ]);
+                    
+                    return response()->json([
+                        'message' => 'Адміністратор може змінювати роль тільки на "Вчитель" або "Користувач"',
+                        'allowed_roles' => ['teacher', 'user']
+                    ], 403);
+                }
+
+                // Адміністратор не може змінювати роль супер адміна або іншого адміна
+                if ($user->role && in_array($user->role->name, ['super_admin', 'admin'])) {
+                    Log::warning('UserController@changeRole: Адмін намагається змінити роль адміна/супер адміна');
+                    
+                    return response()->json([
+                        'message' => 'Адміністратор не може змінювати роль іншого адміністратора або супер адміністратора'
+                    ], 403);
+                }
+                
+            } else {
+                // Користувачі з іншими ролями не мають права змінювати ролі
+                Log::warning('UserController@changeRole: Недостатньо прав', [
+                    'user_role' => $authUserRole
+                ]);
+                
+                return response()->json([
+                    'message' => 'У вас немає прав для зміни ролей користувачів'
+                ], 403);
+            }
+
+            // Знаходимо нову роль
+            $newRole = Role::where('name', $requestedRoleName)->first();
+            
+            if (!$newRole) {
+                Log::error('UserController@changeRole: Роль не знайдена', [
+                    'role_name' => $requestedRoleName
+                ]);
+                
+                return response()->json([
+                    'message' => 'Роль не знайдена',
+                    'role_name' => $requestedRoleName
+                ], 404);
+            }
+
+            // Перевіряємо, чи роль дійсно змінилася
+            if ($user->role_id == $newRole->id) {
+                return response()->json([
+                    'message' => 'Користувач вже має цю роль',
+                    'current_role' => $user->role->name
+                ], 400);
+            }
+
+            // Зберігаємо стару роль для логування
+            $oldRoleName = $user->role ? $user->role->name : 'немає ролі';
+
+            // Змінюємо роль
+            $user->role_id = $newRole->id;
+            $user->save();
+
+            Log::info('UserController@changeRole: Роль успішно змінена', [
+                'user_id' => $user->id,
+                'old_role' => $oldRoleName,
+                'new_role' => $newRole->name,
+                'changed_by' => $authUser->id
+            ]);
+            
             return response()->json([
-                'message' => 'Помилка валідації даних',
-                'errors' => $validator->errors()
-            ], 422);
-        }
+                'message' => 'Роль користувача успішно змінено',
+                'user' => [
+                    'id' => $user->id,
+                    'name' => $user->name,
+                    'last_name' => $user->last_name,
+                    'email' => $user->email,
+                    'old_role' => $oldRoleName,
+                    'new_role' => $newRole->name
+                ]
+            ], 200);
 
-        $user = User::findOrFail($id);
-        $newRole = Role::findOrFail($request->role_id);
-        
-        // Перевірка на спробу зміни ролі на super_admin
-        if ($newRole->name === 'super_admin' && auth()->user()->role->name !== 'super_admin') {
+        } catch (\Exception $e) {
+            Log::error('UserController@changeRole: Помилка', [
+                'user_id' => $id,
+                'message' => $e->getMessage(),
+                'line' => $e->getLine(),
+                'file' => $e->getFile(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            
             return response()->json([
-                'message' => 'Тільки супер-адміністратор може призначати роль супер-адміністратора'
-            ], 403);
+                'message' => 'Сталася помилка при зміні ролі користувача',
+                'error' => $e->getMessage()
+            ], 500);
         }
-
-        $user->role_id = $request->role_id;
-        $user->save();
-        
-        return response()->json([
-            'message' => 'Роль користувача успішно змінено',
-            'user' => $user->load('role')
-        ], 200);
     }
 
     /**
