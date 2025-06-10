@@ -423,26 +423,54 @@ class PaymentController extends Controller
      */
     public function testProcessCallback($paymentId) 
     {
-        
-        
         try {
             $payment = Payment::findOrFail($paymentId);
             $course = Course::findOrFail($payment->entity_id);
             $user = User::findOrFail($payment->user_id);
+            
+            DB::beginTransaction();
             
             // Симуляція успішної оплати
             $payment->payment_status = 'completed';
             $payment->transaction_id = 'test_' . time();
             $payment->save();
             
-            // Створення підписки
-            $enrollment = CourseEnrollment::create([
-                'user_id' => $payment->user_id,
-                'course_id' => $payment->entity_id,
-                'enrollment_type' => 'purchase',
-                'payment_id' => $payment->id,
-                'is_active' => true,
-            ]);
+            // Перевірка існуючої підписки
+            $existingEnrollment = CourseEnrollment::where('user_id', $payment->user_id)
+                ->where('course_id', $payment->entity_id)
+                ->first();
+            
+            if ($existingEnrollment) {
+                // Оновлюємо існуючу підписку
+                $existingEnrollment->update([
+                    'payment_id' => $payment->id,
+                    'is_active' => true,
+                    'enrollment_type' => 'purchase',
+                    'expires_at' => null, // Безлімітний доступ для покупки
+                ]);
+                $enrollment = $existingEnrollment;
+                
+                Log::info('Existing enrollment updated', [
+                    'enrollment_id' => $enrollment->id,
+                    'payment_id' => $payment->id
+                ]);
+            } else {
+                // Створення нової підписки
+                $enrollment = CourseEnrollment::create([
+                    'user_id' => $payment->user_id,
+                    'course_id' => $payment->entity_id,
+                    'enrollment_type' => 'purchase',
+                    'payment_id' => $payment->id,
+                    'is_active' => true,
+                ]);
+                
+                Log::info('New enrollment created', [
+                    'enrollment_id' => $enrollment->id,
+                    'payment_id' => $payment->id
+                ]);
+            }
+            
+            DB::commit();
             
             return response()->json([
                 'success' => true,
@@ -452,21 +480,30 @@ class PaymentController extends Controller
             ]);
             
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Платіж, курс або користувач не знайдено'
-            ], 404);
-            
-        } catch (\Exception $e) {
-            Log::error('Test callback error', [
+            DB::rollBack();
+            Log::error('Test callback - model not found', [
                 'payment_id' => $paymentId,
                 'error' => $e->getMessage()
             ]);
             
             return response()->json([
                 'success' => false,
-                'message' => 'Помилка при обробці тестового callback'
+                'message' => 'Платіж, курс або користувач не знайдено'
+            ], 404);
+            
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('Test callback error', [
+                'payment_id' => $paymentId,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Помилка при обробці тестового callback: ' . $e->getMessage()
             ], 500);
         }
     }
+
 }
