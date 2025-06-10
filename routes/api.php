@@ -14,7 +14,10 @@ use App\Http\Controllers\Api\ModuleController;
 use App\Http\Controllers\Api\LessonController;
 use App\Http\Controllers\Api\CourseEnrollmentController;
 use App\Http\Controllers\Api\PaymentController;
-
+use App\Http\Controllers\Api\ReviewController;
+use App\Http\Controllers\Api\InternalTestController;
+use App\Http\Middleware\CheckRole;
+use App\Http\Controllers\Api\TestMediaController;
 // ========================================
 // ТЕСТОВІ ТА ДОПОМІЖНІ МАРШРУТИ
 // ========================================
@@ -158,7 +161,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // Оплата та платежі
     Route::prefix('payments')->group(function () {
         Route::get('/', [PaymentController::class, 'getUserPayments']);
-        Route::post('/course/{courseId}', [PaymentController::class, 'createCoursePayment']);
+        Route::post('/course/{courseId}', [PaymentController::class, 'createCoursePayment']);        
         Route::post('/course/{courseId}/liqpay', [PaymentController::class, 'initiateCoursePayment']);
         Route::get('/{paymentId}/status', [PaymentController::class, 'checkPaymentStatus']);
         Route::get('/course/{courseId}/success', [PaymentController::class, 'paymentSuccess'])->name('courses.payment.success');
@@ -173,10 +176,37 @@ Route::middleware('auth:sanctum')->group(function () {
     // ----------------------------------------
     // Доступ до вмісту курсів (з перевіркою доступу)
     // ----------------------------------------
-    Route::middleware('check.course.access')->group(function () {
-        Route::prefix('lern')->group(function () {
+    Route::middleware(\App\Http\Middleware\CheckCourseAccess::class)->group(function () {        Route::prefix('lern')->group(function () {
             Route::get('/courses/{courseId}/modules', [ModuleController::class, 'getModulesByCourse']);
             Route::get('/courses/{courseId}/modules/{moduleId}/lessons', [LessonController::class, 'getLessonsByModule']);
+        });
+
+    // ----------------------------------------
+    // Проходження тестів (для студентів з доступом до курсу)
+    // ----------------------------------------
+
+     Route::prefix('tests')->group(function () {
+            
+            // Перегляд тесту перед початком
+            Route::get('/{testId}', [App\Http\Controllers\Api\InternalTestController::class, 'show']);
+            
+            // Початок тесту
+            Route::post('/{testId}/start', [App\Http\Controllers\Api\InternalTestController::class, 'startAttempt']);
+            
+            // Відповідь на питання
+            Route::post('/{testId}/attempts/{attemptId}/answer', [App\Http\Controllers\Api\InternalTestController::class, 'submitAnswer']);
+            
+            // Завершення тесту
+            Route::post('/{testId}/attempts/{attemptId}/finish', [App\Http\Controllers\Api\InternalTestController::class, 'finishAttempt']);
+            
+            // Отримання результатів
+            Route::get('/{testId}/attempts/{attemptId}/results', [App\Http\Controllers\Api\InternalTestController::class, 'getResults']);
+            
+            // Історія спроб користувача
+            Route::get('/{testId}/my-attempts', [App\Http\Controllers\Api\InternalTestController::class, 'getUserAttempts']);
+            
+            // Отримання поточного стану тесту (для продовження)
+            Route::get('/{testId}/current-attempt', [App\Http\Controllers\Api\InternalTestController::class, 'getCurrentAttempt']);
         });
     });
     
@@ -215,6 +245,42 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::post('/positions', [LessonController::class, 'updatePositions']);
             Route::delete('/{id}', [LessonController::class, 'destroy']);
         });
+
+    // ========================================
+    // ВНУТРІШНІ ТЕСТИ
+    // ========================================
+
+      // CRUD операції з тестами
+        Route::prefix('internal-tests')->group(function () {
+            Route::post('/', [App\Http\Controllers\Api\InternalTestController::class, 'store']);
+            Route::get('/{id}', [App\Http\Controllers\Api\InternalTestController::class, 'show']);
+            Route::put('/{id}', [App\Http\Controllers\Api\InternalTestController::class, 'update']);
+            Route::delete('/{id}', [App\Http\Controllers\Api\InternalTestController::class, 'destroy']);
+            
+            // Управління питаннями
+            Route::post('/{testId}/questions', [App\Http\Controllers\Api\InternalTestController::class, 'addQuestion']);
+            Route::put('/{testId}/questions/{questionId}', [App\Http\Controllers\Api\InternalTestController::class, 'updateQuestion']);
+            Route::delete('/{testId}/questions/{questionId}', [App\Http\Controllers\Api\InternalTestController::class, 'deleteQuestion']);
+            
+            // Додаткові функції управління
+            Route::put('/{testId}/questions/order', [App\Http\Controllers\Api\InternalTestController::class, 'updateQuestionsOrder']);
+            Route::post('/{testId}/duplicate', [App\Http\Controllers\Api\InternalTestController::class, 'duplicateTest']);
+            
+            // Аналітика та статистика (тільки для викладачів своїх тестів та адміністраторів)
+            Route::get('/{testId}/analytics', [App\Http\Controllers\Api\InternalTestController::class, 'getAnalytics']);
+            Route::get('/{testId}/attempts', [App\Http\Controllers\Api\InternalTestController::class, 'getAllAttempts']);
+        });
+
+        // Управління медіафайлами тестів
+        Route::prefix('test-media')->group(function () {
+            Route::post('/question/{questionId}/upload', [App\Http\Controllers\Api\TestMediaController::class, 'uploadQuestionMedia']);
+            Route::post('/answer/{answerId}/upload', [App\Http\Controllers\Api\TestMediaController::class, 'uploadAnswerMedia']);
+            Route::delete('/question/{questionId}/media', [App\Http\Controllers\Api\TestMediaController::class, 'deleteQuestionMedia']);
+            Route::delete('/answer/{answerId}/media', [App\Http\Controllers\Api\TestMediaController::class, 'deleteAnswerMedia']);
+            Route::get('/stats', [App\Http\Controllers\Api\TestMediaController::class, 'getMediaStats']);
+            Route::post('/cleanup', [App\Http\Controllers\Api\TestMediaController::class, 'cleanupOrphanedFiles']);
+        });
+
     });
     
     // ----------------------------------------
@@ -288,5 +354,13 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::delete('/reviews/{reviewId}/reject', [App\Http\Controllers\Api\ReviewController::class, 'rejectReview']);
             Route::delete('/comments/{commentId}/reject', [App\Http\Controllers\Api\ReviewController::class, 'rejectComment']);
         });
+    });
+
+     // ----------------------------------------
+    // Публічні маршрути для медіафайлів (з перевіркою доступу)
+    // ----------------------------------------
+    Route::prefix('test-media')->group(function () {
+        Route::get('/question/{questionId}', [App\Http\Controllers\Api\TestMediaController::class, 'getQuestionMedia']);
+        Route::get('/answer/{answerId}', [App\Http\Controllers\Api\TestMediaController::class, 'getAnswerMedia']);
     });
 });

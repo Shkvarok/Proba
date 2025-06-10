@@ -40,6 +40,14 @@ class Lesson extends Model
         return $this->hasOne(LessonExtraMaterial::class);
     }
 
+    /**
+     * Внутрішній тест (якщо test.source_type === 'internal')
+     */
+    public function internalTest(): HasOne
+    {
+        return $this->hasOne(InternalTest::class);
+    }
+
     // Метод для отримання пов'язаних даних в залежності від типу уроку
     public function details()
     {
@@ -55,5 +63,26 @@ class Lesson extends Model
     public function course()
     {
         return $this->module->course;
+    }
+
+    /**
+     * Перевірити, чи урок має внутрішній тест
+     */
+    public function hasInternalTest(): bool
+    {
+        return $this->type === 'test' && 
+               $this->test && 
+               $this->test->source_type === 'internal' &&
+               $this->internalTest !== null;
+    }
+
+    /**
+     * Перевірити, чи урок має зовнішній тест
+     */
+    public function hasExternalTest(): bool
+    {
+        return $this->type === 'test' && 
+               $this->test && 
+               $this->test->source_type === 'external';
     }
 }

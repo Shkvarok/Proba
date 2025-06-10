@@ -67,7 +67,8 @@ class Kernel extends HttpKernel
         'role' => \App\Http\Middleware\CheckRole::class,
         'sanctum' => \Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful::class,
         'check.course.access' => \App\Http\Middleware\CheckCourseAccess::class,
+        'check.test.access' => \App\Http\Middleware\CheckTestAccess::class,
         'check.course.review.access' => \App\Http\Middleware\CheckCourseReviewAccess::class,
-
+        'check.role' => \App\Http\Middleware\CheckRole::class,
     ];
 }
