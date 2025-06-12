@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Facades\Storage;
 
 class Course extends Model
 {
@@ -17,7 +18,7 @@ class Course extends Model
      *
      * @var array<int, string>
      */
-   protected $fillable = [
+    protected $fillable = [
         'title',
         'description',
         'category_id',
@@ -27,7 +28,7 @@ class Course extends Model
         'discount_expires_at',
         'level_id',
         'language',
-        'cover_image',        // ← Використовуємо cover_image
+        'cover_image',
         'promo_video_url',
         'requirements',
         'what_you_learn',
@@ -132,22 +133,33 @@ class Course extends Model
         return (float) $this->price;
     }
 
-     public function modules(): HasMany
+    /**
+     * Get the modules for the course.
+     */
+    public function modules(): HasMany
     {
         return $this->hasMany(Module::class);
     }
-    
-/**
- * Підписки на цей курс
- */
+
+    /**
+     * Get the cover image URL.
+     */
+    public function getCoverImageUrlAttribute(): ?string
+    {
+        return $this->cover_image ? Storage::disk('public')->url($this->cover_image) : null;
+    }
+
+    /**
+     * Підписки на цей курс
+     */
     public function enrollments()
     {
         return $this->hasMany(CourseEnrollment::class);
     }
 
-/**
- * Користувачі, підписані на цей курс
- */
+    /**
+     * Користувачі, підписані на цей курс
+     */
     public function enrolledUsers()
     {
         return $this->belongsToMany(User::class, 'course_enrollments')
@@ -156,33 +168,34 @@ class Course extends Model
             ->wherePivotNull('expires_at')
             ->orWherePivot('expires_at', '>', now());
     }
-/**
- * Отримати відгуки до курсу
- */
+
+    /**
+     * Отримати відгуки до курсу
+     */
     public function reviews()
     {
         return $this->hasMany(Review::class);
     }
 
-/**
- * Отримати схвалені відгуки до курсу
- */
+    /**
+     * Отримати схвалені відгуки до курсу
+     */
     public function approvedReviews()
     {
         return $this->reviews()->approved();
     }
 
-/**
- * Отримати середній рейтинг курсу
- */
+    /**
+     * Отримати середній рейтинг курсу
+     */
     public function getAverageRatingAttribute()
     {
         return $this->approvedReviews()->avg('rating') ?: 0;
     }
 
-/**
- * Отримати кількість відгуків до курсу
- */
+    /**
+     * Отримати кількість відгуків до курсу
+     */
     public function getReviewsCountAttribute()
     {
         return $this->approvedReviews()->count();

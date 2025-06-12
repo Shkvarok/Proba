@@ -114,14 +114,11 @@ class CourseService
      * @param UploadedFile|null $coverImage
      * @return Course
      */
-     public function createCourse(array $data, ?UploadedFile $coverImage = null): Course
+    public function createCourse(array $data, ?UploadedFile $coverImage = null): Course
     {
-    // Логування даних перед створенням
+        // Логування даних перед створенням
         \Log::info('CourseService::createCourse called with data:', $data);
         
-        // Переконуємося що thumbnail включений в fillable поля моделі
-        $course = Course::create($data);
-
         // Обробка зображення обкладинки
         if ($coverImage) {
             $data['cover_image'] = $this->uploadCoverImage($coverImage);
@@ -138,27 +135,35 @@ class CourseService
         }
         
         // Встановлюємо автора курсу
-        // Якщо користувач є адміністратором або супер-адміністратором і не вказав instructor_id,
-        // встановлюємо instructor_id = 1
         if (auth()->user()->isAdmin() && (!isset($data['instructor_id']) || empty($data['instructor_id']))) {
             $data['instructor_id'] = 1;
         } else {
-            // В іншому випадку (для вчителів), автор - це поточний користувач
             $data['instructor_id'] = auth()->id();
         }
 
-        // Логування після створення
-        Log::info('Course created in database:', [
+        // Перевіряємо наявність зображення перед створенням
+        if (isset($data['cover_image'])) {
+            \Log::info('Cover image path before course creation:', [
+                'path' => $data['cover_image'],
+                'exists' => Storage::disk('public')->exists($data['cover_image'])
+            ]);
+        }
+
+        // Створюємо курс
+        $course = Course::create($data);
+
+        // Перевіряємо результат створення
+        \Log::info('Course created in database:', [
             'id' => $course->id,
-            'cover_image' => $course->cover_image,  // ← На це
+            'cover_image' => $course->cover_image,
             'all_attributes' => $course->toArray()
         ]);
         
-        return Course::create($data);
+        return $course;
     }
 
     // Метод для перевірки, чи може користувач редагувати курс
- public function canUserManageCourse(int $userId, int $courseId): bool
+    public function canUserManageCourse(int $userId, int $courseId): bool
     {
         $course = Course::findOrFail($courseId);
         
@@ -275,14 +280,15 @@ class CourseService
         return Storage::disk('public')->delete($path);
     }
 
-      public function getCoursesByInstructorId(int $instructorId): Collection
+    public function getCoursesByInstructorId(int $instructorId): Collection
     {
         return Course::where('instructor_id', $instructorId)
             ->with(['category', 'level', 'instructor'])
             ->latest()
             ->get();
     }
-      /**
+
+    /**
      * Get courses enrolled by user
      * 
      * @param int $userId

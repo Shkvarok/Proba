@@ -22,6 +22,14 @@ class FileUploadService
             $filename = $this->generateUniqueFilename($file);
             $fullPath = $directory . '/' . $filename;
             
+            \Log::info('Attempting to upload course image:', [
+                'original_name' => $file->getClientOriginalName(),
+                'mime_type' => $file->getMimeType(),
+                'size' => $file->getSize(),
+                'target_path' => $fullPath,
+                'storage_path' => storage_path('app/public/' . $fullPath)
+            ]);
+            
             // Метод 1: Спробувати простий Laravel store
             try {
                 $storedPath = $file->storeAs($directory, $filename, 'public');
@@ -29,101 +37,72 @@ class FileUploadService
                 if ($storedPath && Storage::disk('public')->exists($storedPath)) {
                     \Log::info('File stored successfully using storeAs', [
                         'stored_path' => $storedPath,
-                        'full_path' => storage_path('app/public/' . $storedPath)
+                        'full_path' => storage_path('app/public/' . $storedPath),
+                        'file_exists' => file_exists(storage_path('app/public/' . $storedPath)),
+                        'file_size' => Storage::disk('public')->size($storedPath)
                     ]);
                     return $storedPath;
                 }
             } catch (Exception $e) {
-                \Log::warning('storeAs method failed: ' . $e->getMessage());
+                \Log::warning('storeAs method failed: ' . $e->getMessage(), [
+                    'error' => $e->getMessage(),
+                    'trace' => $e->getTraceAsString()
+                ]);
             }
             
             // Метод 2: Ручне копіювання файлу
             try {
-                $fileContent = file_get_contents($file->getPathname());
-                $saved = Storage::disk('public')->put($fullPath, $fileContent);
-                
-                if ($saved && Storage::disk('public')->exists($fullPath)) {
-                    \Log::info('File stored successfully using manual copy', [
-                        'path' => $fullPath,
-                        'size' => Storage::disk('public')->size($fullPath)
-                    ]);
-                    return $fullPath;
-                }
+                $file->move(storage_path('app/public/' . $directory), $filename);
+                \Log::info('File moved successfully using move method', [
+                    'target_path' => $fullPath,
+                    'file_exists' => file_exists(storage_path('app/public/' . $fullPath))
+                ]);
+                return $fullPath;
             } catch (Exception $e) {
-                \Log::warning('Manual copy method failed: ' . $e->getMessage());
+                \Log::error('Both file upload methods failed', [
+                    'error' => $e->getMessage(),
+                    'trace' => $e->getTraceAsString()
+                ]);
+                throw $e;
             }
-            
-            // Метод 3: Пряме збереження в файлову систему
-            try {
-                $destinationPath = storage_path('app/public/' . $fullPath);
-                $this->ensureDirectoryExistsForFile($destinationPath);
-                
-                if (move_uploaded_file($file->getPathname(), $destinationPath)) {
-                    \Log::info('File stored successfully using move_uploaded_file', [
-                        'destination' => $destinationPath,
-                        'exists' => file_exists($destinationPath)
-                    ]);
-                    return $fullPath;
-                }
-            } catch (Exception $e) {
-                \Log::warning('move_uploaded_file method failed: ' . $e->getMessage());
-            }
-            
-            throw new Exception('Всі методи збереження файлу завершились невдачею');
-            
         } catch (Exception $e) {
-            \Log::error('FileUploadService error: ' . $e->getMessage());
-            throw new Exception('Помилка при завантаженні файлу: ' . $e->getMessage());
+            \Log::error('Failed to upload course image', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            throw $e;
         }
     }
 
     /**
      * Ensure directory exists
      */
-    private function ensureDirectoryExists(string $directory): void
+    protected function ensureDirectoryExists(string $directory): void
     {
-        $fullPath = storage_path('app/public/' . $directory);
-        
-        if (!is_dir($fullPath)) {
-            if (!mkdir($fullPath, 0755, true)) {
-                throw new Exception("Не вдалося створити директорію: {$fullPath}");
-            }
-            \Log::info('Directory created: ' . $fullPath);
+        $path = storage_path('app/public/' . $directory);
+        if (!file_exists($path)) {
+            mkdir($path, 0755, true);
         }
     }
 
     /**
-     * Ensure directory exists for specific file
+     * Ensure directory exists for file
      */
-    private function ensureDirectoryExistsForFile(string $filePath): void
+    protected function ensureDirectoryExistsForFile(string $filePath): void
     {
         $directory = dirname($filePath);
-        
-        if (!is_dir($directory)) {
-            if (!mkdir($directory, 0755, true)) {
-                throw new Exception("Не вдалося створити директорію: {$directory}");
-            }
+        if (!file_exists($directory)) {
+            mkdir($directory, 0755, true);
         }
     }
 
     /**
      * Generate unique filename
      */
-    private function generateUniqueFilename(UploadedFile $file): string
+    protected function generateUniqueFilename(UploadedFile $file): string
     {
-        $extension = strtolower($file->getClientOriginalExtension());
-        $basename = pathinfo($file->getClientOriginalName(), PATHINFO_FILENAME);
-        
-        // Очищення імені файлу для Windows
-        $cleanBasename = preg_replace('/[^a-zA-Z0-9-_]/', '-', $basename);
-        $cleanBasename = trim($cleanBasename, '-');
-        $cleanBasename = substr($cleanBasename, 0, 30); // Обмежуємо довжину
-        
-        // Генерація унікального суфіксу
-        $timestamp = time();
-        $randomString = Str::random(8);
-        
-        return $cleanBasename . '_' . $timestamp . '_' . $randomString . '.' . $extension;
+        $extension = $file->getClientOriginalExtension();
+        return time() . '_' . Str::random(10) . '.' . $extension;
     }
 
     /**

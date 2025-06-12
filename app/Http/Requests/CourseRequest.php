@@ -110,7 +110,7 @@ class CourseRequest extends FormRequest
      */
     public function getCourseData(): array
     {
-        return $this->only([
+        $data = $this->only([
             'title',
             'description',
             'category_id',
@@ -120,7 +120,7 @@ class CourseRequest extends FormRequest
             'discount_expires_at',
             'level_id',
             'language',
-            'cover_image',        // ← Змінено з thumbnail на cover_image
+            'cover_image',
             'promo_video_url',
             'requirements',
             'what_you_learn',
@@ -128,5 +128,10 @@ class CourseRequest extends FormRequest
             'meta_title',
             'meta_description'
         ]);
+
+        // Логуємо дані перед поверненням
+        \Log::info('CourseRequest::getCourseData returning:', $data);
+
+        return $data;
     }
 }

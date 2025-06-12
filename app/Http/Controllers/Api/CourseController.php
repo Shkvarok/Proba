@@ -65,7 +65,7 @@ class CourseController extends Controller
     /**
      * Store a newly created course in storage.
      */
-    public function store(CourseRequest $request): JsonResponse|CourseResource
+    public function store(CourseRequest $request): JsonResponse
     {
         DB::beginTransaction();
         
@@ -73,19 +73,6 @@ class CourseController extends Controller
             Log::info('=== ДІАГНОСТИКА ЗАВАНТАЖЕННЯ КУРСУ ===');
             Log::info('Request data:', $request->all());
             Log::info('Files in request:', $request->allFiles());
-            Log::info('Has cover_image file:', ['has_cover_image' => $request->hasFile('cover_image')]);
-            
-            if ($request->hasFile('cover_image')) {
-                $file = $request->file('cover_image');
-                Log::info('File details:', [
-                    'original_name' => $file->getClientOriginalName(),
-                    'mime_type' => $file->getMimeType(),
-                    'size' => $file->getSize(),
-                    'is_valid' => $file->isValid(),
-                    'path' => $file->getPathname(),
-                    'extension' => $file->getClientOriginalExtension()
-                ]);
-            }
             
             $courseData = $request->getCourseData();
             Log::info('Course data from request:', $courseData);
@@ -103,7 +90,11 @@ class CourseController extends Controller
                     throw new Exception('Завантажений файл пошкоджений: ' . $coverImage->getErrorMessage());
                 }
                 
-                Log::info('Processing file upload...');
+                Log::info('Processing file upload...', [
+                    'original_name' => $coverImage->getClientOriginalName(),
+                    'mime_type' => $coverImage->getMimeType(),
+                    'size' => $coverImage->getSize()
+                ]);
                 
                 // Завантаження і збереження зображення
                 $imagePath = $this->fileUploadService->uploadCourseImage(
@@ -117,21 +108,28 @@ class CourseController extends Controller
                     'file_size' => Storage::disk('public')->exists($imagePath) ? Storage::disk('public')->size($imagePath) : 'N/A'
                 ]);
                 
-                // ВАЖЛИВО: Використовуємо cover_image замість thumbnail
+                // Важливо: зберігаємо відносний шлях до файлу
                 $courseData['cover_image'] = $imagePath;
-                
-            } else {
-                Log::warning('No cover_image file found in request');
             }
             
             Log::info('Final course data before creation:', $courseData);
             
+            // Створюємо курс
             $course = $this->courseService->createCourse($courseData);
             
-            Log::info('Course created successfully:', [
-                'course_id' => $course->id,
-                'cover_image' => $course->cover_image
-            ]);
+            // Перевіряємо, чи збереглося зображення
+            if ($course->cover_image) {
+                Log::info('Course image saved in database:', [
+                    'course_id' => $course->id,
+                    'cover_image' => $course->cover_image,
+                    'exists_in_storage' => Storage::disk('public')->exists($course->cover_image)
+                ]);
+            } else {
+                Log::warning('Course image was not saved in database', [
+                    'course_id' => $course->id,
+                    'course_data' => $courseData
+                ]);
+            }
             
             DB::commit();
             
@@ -155,15 +153,11 @@ class CourseController extends Controller
             
             return response()->json([
                 'success' => false,
-                'message' => 'Помилка при створенні курсу: ' . $e->getMessage(),
-                'debug_info' => [
-                    'has_file' => $request->hasFile('cover_image'),
-                    'files' => $request->allFiles(),
-                    'course_data' => $courseData ?? null
-                ]
+                'message' => 'Помилка при створенні курсу: ' . $e->getMessage()
             ], 500);
         }
     }
+
     /**
      * Display the specified course.
      */
