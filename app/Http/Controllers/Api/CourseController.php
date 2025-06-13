@@ -70,68 +70,28 @@ class CourseController extends Controller
         DB::beginTransaction();
         
         try {
-            Log::info('=== ДІАГНОСТИКА ЗАВАНТАЖЕННЯ КУРСУ ===');
-            Log::info('Request data:', $request->all());
-            Log::info('Files in request:', $request->allFiles());
+            Log::info('=== СТВОРЕННЯ КУРСУ ===', [
+                'user_id' => auth()->id(),
+                'request_data' => $request->except(['cover_image']),
+                'has_cover_image' => $request->hasFile('cover_image')
+            ]);
             
+            // Отримуємо дані курсу
             $courseData = $request->getCourseData();
-            Log::info('Course data from request:', $courseData);
             
-            // Обробка завантаження обкладинки
-            if ($request->hasFile('cover_image')) {
-                $coverImage = $request->file('cover_image');
-                
-                // Перевірка на валідність файлу
-                if (!$coverImage->isValid()) {
-                    Log::error('File is not valid:', [
-                        'error' => $coverImage->getError(),
-                        'error_message' => $coverImage->getErrorMessage()
-                    ]);
-                    throw new Exception('Завантажений файл пошкоджений: ' . $coverImage->getErrorMessage());
-                }
-                
-                Log::info('Processing file upload...', [
-                    'original_name' => $coverImage->getClientOriginalName(),
-                    'mime_type' => $coverImage->getMimeType(),
-                    'size' => $coverImage->getSize()
-                ]);
-                
-                // Завантаження і збереження зображення
-                $imagePath = $this->fileUploadService->uploadCourseImage(
-                    $coverImage, 
-                    'course-covers'
-                );
-                
-                Log::info('Image uploaded successfully:', [
-                    'path' => $imagePath,
-                    'exists_in_storage' => Storage::disk('public')->exists($imagePath),
-                    'file_size' => Storage::disk('public')->exists($imagePath) ? Storage::disk('public')->size($imagePath) : 'N/A'
-                ]);
-                
-                // Важливо: зберігаємо відносний шлях до файлу
-                $courseData['cover_image'] = $imagePath;
-            }
+            // Обробляємо завантаження зображення
+            $coverImage = $request->hasFile('cover_image') ? $request->file('cover_image') : null;
             
-            Log::info('Final course data before creation:', $courseData);
-            
-            // Створюємо курс
-            $course = $this->courseService->createCourse($courseData);
-            
-            // Перевіряємо, чи збереглося зображення
-            if ($course->cover_image) {
-                Log::info('Course image saved in database:', [
-                    'course_id' => $course->id,
-                    'cover_image' => $course->cover_image,
-                    'exists_in_storage' => Storage::disk('public')->exists($course->cover_image)
-                ]);
-            } else {
-                Log::warning('Course image was not saved in database', [
-                    'course_id' => $course->id,
-                    'course_data' => $courseData
-                ]);
-            }
+            // Створюємо курс через сервіс
+            $course = $this->courseService->createCourse($courseData, $coverImage);
             
             DB::commit();
+            
+            Log::info('Курс успішно створено', [
+                'course_id' => $course->id,
+                'title' => $course->title,
+                'cover_image' => $course->cover_image
+            ]);
             
             return (new CourseResource($course))
                 ->response()
@@ -139,11 +99,6 @@ class CourseController extends Controller
                 
         } catch (Exception $e) {
             DB::rollBack();
-            
-            // Видалення завантаженого файлу у разі помилки
-            if (isset($imagePath) && Storage::disk('public')->exists($imagePath)) {
-                Storage::disk('public')->delete($imagePath);
-            }
             
             Log::error('Помилка при створенні курсу', [
                 'message' => $e->getMessage(),
@@ -187,51 +142,40 @@ class CourseController extends Controller
     /**
      * Update the specified course in storage.
      */
-    public function update(CourseRequest $request, int $id): JsonResponse|CourseResource
+    public function update(CourseRequest $request, int $id): JsonResponse
     {
         DB::beginTransaction();
         
         try {
+            Log::info('=== ОНОВЛЕННЯ КУРСУ ===', [
+                'course_id' => $id,
+                'user_id' => auth()->id(),
+                'request_data' => $request->except(['cover_image']),
+                'has_cover_image' => $request->hasFile('cover_image')
+            ]);
+            
             $course = $this->courseService->getCourseById($id);
+            
+            // Перевірка прав доступу
+            if (!$this->courseService->canUserManageCourse(auth()->id(), $id)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'У вас немає прав для редагування цього курсу'
+                ], 403);
+            }
+            
             $courseData = $request->getCourseData();
-            $oldImagePath = $course->thumbnail;
+            $coverImage = $request->hasFile('cover_image') ? $request->file('cover_image') : null;
             
-            // Обробка нового зображення обкладинки
-            if ($request->hasFile('cover_image')) {
-                $coverImage = $request->file('cover_image');
-                
-                if (!$coverImage->isValid()) {
-                    throw new Exception('Завантажений файл пошкоджений');
-                }
-                
-                // Завантаження нового зображення
-                $imagePath = $this->fileUploadService->uploadCourseImage(
-                    $coverImage, 
-                    'course-covers'
-                );
-                
-                $courseData['thumbnail'] = $imagePath;
-                
-                Log::info('Нове зображення обкладинки завантажено', [
-                    'course_id' => $id,
-                    'new_path' => $imagePath,
-                    'old_path' => $oldImagePath
-                ]);
-            }
-            
-            $updatedCourse = $this->courseService->updateCourse($course, $courseData);
-            
-            // Видалення старого зображення після успішного оновлення
-            if (isset($imagePath) && $oldImagePath && Storage::exists($oldImagePath)) {
-                Storage::delete($oldImagePath);
-                Log::info('Старе зображення видалено', ['path' => $oldImagePath]);
-            }
+            // Оновлюємо курс через сервіс
+            $updatedCourse = $this->courseService->updateCourse($course, $courseData, $coverImage);
             
             DB::commit();
             
             Log::info('Курс успішно оновлено', [
                 'course_id' => $id,
-                'title' => $updatedCourse->title
+                'title' => $updatedCourse->title,
+                'cover_image' => $updatedCourse->cover_image
             ]);
             
             return new CourseResource($updatedCourse);
@@ -239,21 +183,16 @@ class CourseController extends Controller
         } catch (Exception $e) {
             DB::rollBack();
             
-            // Видалення нового файлу у разі помилки
-            if (isset($imagePath) && Storage::exists($imagePath)) {
-                Storage::delete($imagePath);
-            }
-            
             Log::error('Помилка при оновленні курсу', [
                 'course_id' => $id,
                 'message' => $e->getMessage(),
-                'user_id' => auth()->id()
+                'trace' => $e->getTraceAsString()
             ]);
             
             return response()->json([
                 'success' => false,
                 'message' => 'Помилка при оновленні курсу: ' . $e->getMessage()
-            ], $e->getCode() == 404 ? 404 : 500);
+            ], 500);
         }
     }
 
@@ -266,15 +205,16 @@ class CourseController extends Controller
         
         try {
             $course = $this->courseService->getCourseById($id);
-            $imagePath = $course->thumbnail;
+            
+            // Перевірка прав доступу
+            if (!$this->courseService->canUserManageCourse(auth()->id(), $id)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'У вас немає прав для видалення цього курсу'
+                ], 403);
+            }
             
             $this->courseService->deleteCourse($course);
-            
-            // Видалення зображення обкладинки
-            if ($imagePath && Storage::exists($imagePath)) {
-                Storage::delete($imagePath);
-                Log::info('Зображення курсу видалено', ['path' => $imagePath]);
-            }
             
             DB::commit();
             

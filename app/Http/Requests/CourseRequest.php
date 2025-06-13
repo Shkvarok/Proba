@@ -36,6 +36,7 @@ class CourseRequest extends FormRequest
             'language' => ['nullable', 'string', 'max:50'],
             'cover_image' => [
                 'nullable',
+                'file',
                 'image',
                 'mimes:jpeg,jpg,png,webp',
                 'max:2048', // 2MB
@@ -45,7 +46,6 @@ class CourseRequest extends FormRequest
             'requirements' => ['nullable', 'string', 'max:5000'],
             'what_you_learn' => ['nullable', 'string', 'max:5000'],
             'is_published' => ['nullable', 'boolean'],
-            'is_free' => ['nullable', 'boolean'],
         ];
 
         return $rules;
@@ -74,6 +74,7 @@ class CourseRequest extends FormRequest
             'discount_expires_at.after' => 'Дата закінчення знижки повинна бути в майбутньому.',
             'level_id.required' => 'Рівень складності обов\'язковий.',
             'level_id.exists' => 'Обраний рівень складності не існує.',
+            'cover_image.file' => 'Обкладинка повинна бути файлом.',
             'cover_image.image' => 'Файл обкладинки повинен бути зображенням.',
             'cover_image.mimes' => 'Дозволені формати зображень: JPEG, JPG, PNG, WebP.',
             'cover_image.max' => 'Розмір зображення обкладинки не повинен перевищувати 2MB.',
@@ -92,16 +93,12 @@ class CourseRequest extends FormRequest
     {
         // Якщо ціна 0, то автоматично позначити як безкоштовний
         if ($this->has('price') && $this->price == 0) {
-            $this->merge([
-                'is_free' => true
-            ]);
+            $this->merge(['is_free' => true]);
         }
 
-        // Установити instructor_id як поточного користувача, якщо не вказано
+        // Встановити instructor_id як поточного користувача, якщо не вказано
         if (!$this->has('instructor_id')) {
-            $this->merge([
-                'instructor_id' => auth()->id()
-            ]);
+            $this->merge(['instructor_id' => auth()->id()]);
         }
     }
 
@@ -110,6 +107,7 @@ class CourseRequest extends FormRequest
      */
     public function getCourseData(): array
     {
+        // Отримуємо тільки поля без файлу
         $data = $this->only([
             'title',
             'description',
@@ -120,7 +118,6 @@ class CourseRequest extends FormRequest
             'discount_expires_at',
             'level_id',
             'language',
-            'cover_image',
             'promo_video_url',
             'requirements',
             'what_you_learn',
@@ -129,8 +126,7 @@ class CourseRequest extends FormRequest
             'meta_description'
         ]);
 
-        // Логуємо дані перед поверненням
-        \Log::info('CourseRequest::getCourseData returning:', $data);
+        Log::info('CourseRequest::getCourseData returning:', $data);
 
         return $data;
     }

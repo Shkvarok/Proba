@@ -3,6 +3,7 @@
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Storage;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\UserController;
 use App\Http\Controllers\Api\CategoryController;
@@ -26,6 +27,90 @@ use App\Http\Middleware\CheckCourseAccess;
 
 Route::get('/test', function() {
     return response()->json(['message' => 'testing'], 200);
+});
+
+// ТЕСТОВИЙ МАРШРУТ ДЛЯ STORAGE
+Route::get('/test-storage', function() {
+    try {
+        // Тестуємо створення файлу
+        Storage::disk('public')->put('test-connection.txt', 'Hello World ' . now());
+        $exists = Storage::disk('public')->exists('test-connection.txt');
+        $url = Storage::disk('public')->url('test-connection.txt');
+        $content = Storage::disk('public')->get('test-connection.txt');
+        Storage::disk('public')->delete('test-connection.txt');
+        
+        return response()->json([
+            'success' => true,
+            'storage_path' => storage_path('app/public'),
+            'public_path' => public_path('storage'),
+            'link_exists' => is_link(public_path('storage')),
+            'course_covers_dir_exists' => is_dir(storage_path('app/public/course-covers')),
+            'course_covers_writable' => is_writable(storage_path('app/public/course-covers')),
+            'test_file_created' => $exists,
+            'test_file_content' => $content,
+            'generated_url' => $url,
+            'app_url' => config('app.url'),
+            'filesystem_disk' => config('filesystems.default'),
+            'public_disk_config' => config('filesystems.disks.public'),
+            'permissions' => [
+                'storage_app_public' => substr(sprintf('%o', fileperms(storage_path('app/public'))), -4),
+                'course_covers' => file_exists(storage_path('app/public/course-covers')) ? 
+                    substr(sprintf('%o', fileperms(storage_path('app/public/course-covers'))), -4) : 'not_exists'
+            ]
+        ]);
+    } catch (Exception $e) {
+        return response()->json([
+            'success' => false,
+            'error' => $e->getMessage(),
+            'trace' => $e->getTraceAsString()
+        ], 500);
+    }
+});
+
+// ТЕСТОВИЙ МАРШРУТ ДЛЯ ЗАВАНТАЖЕННЯ ФАЙЛІВ
+Route::post('/test-upload', function(Request $request) {
+    try {
+        if (!$request->hasFile('test_file')) {
+            return response()->json([
+                'success' => false,
+                'error' => 'No file uploaded',
+                'available_files' => $request->allFiles()
+            ], 400);
+        }
+        
+        $file = $request->file('test_file');
+        
+        if (!$file->isValid()) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Invalid file: ' . $file->getErrorMessage()
+            ], 400);
+        }
+        
+        // Тестуємо завантаження
+        $path = $file->store('test-uploads', 'public');
+        
+        return response()->json([
+            'success' => true,
+            'path' => $path,
+            'url' => Storage::disk('public')->url($path),
+            'exists' => Storage::disk('public')->exists($path),
+            'full_path' => Storage::disk('public')->path($path),
+            'file_info' => [
+                'original_name' => $file->getClientOriginalName(),
+                'mime_type' => $file->getMimeType(),
+                'size' => $file->getSize(),
+                'extension' => $file->getClientOriginalExtension()
+            ]
+        ]);
+        
+    } catch (Exception $e) {
+        return response()->json([
+            'success' => false,
+            'error' => $e->getMessage(),
+            'trace' => $e->getTraceAsString()
+        ], 500);
+    }
 });
 
 Route::get('/test-routes', function() {
@@ -91,6 +176,8 @@ Route::prefix('levels')->group(function () {
 Route::prefix('courses')->group(function () {
     Route::get('/', [CourseController::class, 'index']);
     Route::get('/search', [CourseController::class, 'search']);
+    Route::get('/popular', [CourseController::class, 'getPopular']);
+    Route::get('/featured', [CourseController::class, 'getFeatured']);
     Route::get('/category/{categoryId}', [CourseController::class, 'getByCategory'])->where('categoryId', '[0-9]+');
     Route::get('/level/{levelId}', [CourseController::class, 'getByLevel'])->where('levelId', '[0-9]+');
     Route::get('/instructor/{instructorId}', [CourseController::class, 'getByInstructor'])->where('instructorId', '[0-9]+');
@@ -353,10 +440,17 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::prefix('courses/manage')->group(function () {
             Route::get('/', [CourseController::class, 'getMyCourses']);
             Route::post('/', [CourseController::class, 'store']);
-            Route::put('/{id}', [CourseController::class, 'update'])->where('id', '[0-9]+');
+            
+            // Підтримка як PUT, так і POST з _method=PUT для файлових запитів
+            Route::match(['PUT', 'POST'], '/{id}', [CourseController::class, 'update'])
+                ->where('id', '[0-9]+');
+                  
             Route::delete('/{id}', [CourseController::class, 'destroy'])->where('id', '[0-9]+');
             Route::put('/{id}/publish', [CourseController::class, 'publish'])->where('id', '[0-9]+');
             Route::put('/{id}/unpublish', [CourseController::class, 'unpublish'])->where('id', '[0-9]+');
+            
+            // Масові операції
+            Route::post('/bulk-action', [CourseController::class, 'bulkAction']);
         });
         
         // ========================================
@@ -425,7 +519,6 @@ Route::middleware('auth:sanctum')->group(function () {
     // ТІЛЬКИ ДЛЯ АДМІНІСТРАТОРІВ
     // ========================================
     Route::middleware([CheckRole::class . ':admin,super_admin'])->group(function () {
-        
         // ========================================
         // УПРАВЛІННЯ КОРИСТУВАЧАМИ
         // ========================================
@@ -478,8 +571,9 @@ Route::middleware('auth:sanctum')->group(function () {
         });
         
         // ========================================
-        // СТАТИСТИКА ПЛАТЕЖІВ
+        // СТАТИСТИКА ПЛАТЕЖІВ ТА КУРСІВ
         // ========================================
         Route::get('/admin/payment-stats', [PaymentController::class, 'getPaymentStats']);
+        Route::get('/admin/courses/statistics', [CourseController::class, 'getStatistics']);
     });
 });

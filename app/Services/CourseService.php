@@ -116,47 +116,40 @@ class CourseService
      */
     public function createCourse(array $data, ?UploadedFile $coverImage = null): Course
     {
-        // Логування даних перед створенням
-        \Log::info('CourseService::createCourse called with data:', $data);
+        Log::info('CourseService::createCourse викликано', [
+            'data' => $data,
+            'has_cover_image' => $coverImage !== null
+        ]);
         
         // Обробка зображення обкладинки
         if ($coverImage) {
             $data['cover_image'] = $this->uploadCoverImage($coverImage);
+            Log::info('Зображення обкладинки завантажено', [
+                'path' => $data['cover_image']
+            ]);
         }
         
-        // Створення мета-заголовка, якщо він не вказаний
+        // Створення мета-даних, якщо вони не вказані
         if (!isset($data['meta_title']) || empty($data['meta_title'])) {
             $data['meta_title'] = $data['title'];
         }
         
-        // Створення мета-опису, якщо він не вказаний
         if (!isset($data['meta_description']) || empty($data['meta_description'])) {
             $data['meta_description'] = Str::limit(strip_tags($data['description'] ?? ''), 160);
         }
         
-        // Встановлюємо автора курсу
-        if (auth()->user()->isAdmin() && (!isset($data['instructor_id']) || empty($data['instructor_id']))) {
-            $data['instructor_id'] = 1;
-        } else {
+        // Встановлення автора курсу
+        if (!isset($data['instructor_id']) || empty($data['instructor_id'])) {
             $data['instructor_id'] = auth()->id();
         }
-
-        // Перевіряємо наявність зображення перед створенням
-        if (isset($data['cover_image'])) {
-            \Log::info('Cover image path before course creation:', [
-                'path' => $data['cover_image'],
-                'exists' => Storage::disk('public')->exists($data['cover_image'])
-            ]);
-        }
-
-        // Створюємо курс
+        
+        // Створення курсу
         $course = Course::create($data);
-
-        // Перевіряємо результат створення
-        \Log::info('Course created in database:', [
-            'id' => $course->id,
+        
+        Log::info('Курс створено в базі даних', [
+            'course_id' => $course->id,
             'cover_image' => $course->cover_image,
-            'all_attributes' => $course->toArray()
+            'instructor_id' => $course->instructor_id
         ]);
         
         return $course;
@@ -166,9 +159,9 @@ class CourseService
     public function canUserManageCourse(int $userId, int $courseId): bool
     {
         $course = Course::findOrFail($courseId);
+        $user = auth()->user();
         
-        // Перевіряємо, чи користувач є автором курсу або адміністратором
-        return $course->instructor_id === $userId || auth()->user()->isAdmin();
+        return $course->instructor_id === $userId || $user->hasRole('admin') || $user->hasRole('super_admin');
     }
 
     /**
@@ -176,32 +169,51 @@ class CourseService
      *
      * @param Course $course
      * @param array $data
-     * @param UploadedFile|null $coverImage
      * @return Course
      */
     public function updateCourse(Course $course, array $data, ?UploadedFile $coverImage = null): Course
     {
-        // Обробка зображення обкладинки
+        Log::info('CourseService::updateCourse викликано', [
+            'course_id' => $course->id,
+            'data' => $data,
+            'has_cover_image' => $coverImage !== null
+        ]);
+        
+        $oldImagePath = $course->cover_image;
+        
+        // Обробка нового зображення
         if ($coverImage) {
-            // Видалення старого зображення
-            if ($course->cover_image) {
-                $this->deleteCoverImage($course->cover_image);
-            }
-            
             $data['cover_image'] = $this->uploadCoverImage($coverImage);
+            Log::info('Нове зображення обкладинки завантажено', [
+                'old_path' => $oldImagePath,
+                'new_path' => $data['cover_image']
+            ]);
         }
-
-        // Оновлення мета-заголовка, якщо змінився заголовок і мета-заголовок не вказаний
+        
+        // Оновлення мета-даних
         if (isset($data['title']) && (!isset($data['meta_title']) || empty($data['meta_title']))) {
             $data['meta_title'] = $data['title'];
         }
-
-        // Оновлення мета-опису, якщо змінився опис і мета-опис не вказаний
+        
         if (isset($data['description']) && (!isset($data['meta_description']) || empty($data['meta_description']))) {
             $data['meta_description'] = Str::limit(strip_tags($data['description']), 160);
         }
-
-        return $this->courseRepository->update($course, $data);
+        
+        // Оновлення курсу
+        $course->update($data);
+        
+        // Видалення старого зображення після успішного оновлення
+        if ($coverImage && $oldImagePath && Storage::disk('public')->exists($oldImagePath)) {
+            Storage::disk('public')->delete($oldImagePath);
+            Log::info('Старе зображення видалено', ['path' => $oldImagePath]);
+        }
+        
+        Log::info('Курс оновлено в базі даних', [
+            'course_id' => $course->id,
+            'cover_image' => $course->cover_image
+        ]);
+        
+        return $course;
     }
 
     /**
@@ -213,12 +225,14 @@ class CourseService
     public function deleteCourse(Course $course): ?bool
     {
         // Видалення зображення обкладинки
-        if ($course->cover_image) {
-            $this->deleteCoverImage($course->cover_image);
+        if ($course->cover_image && Storage::disk('public')->exists($course->cover_image)) {
+            Storage::disk('public')->delete($course->cover_image);
+            Log::info('Зображення курсу видалено', ['path' => $course->cover_image]);
         }
 
-        return $this->courseRepository->delete($course);
+        return $course->delete();
     }
+
 
     /**
      * Search courses by query.
@@ -262,9 +276,28 @@ class CourseService
      */
     protected function uploadCoverImage(UploadedFile $image): string
     {
+        // Перевірка валідності файлу
+        if (!$image->isValid()) {
+            throw new Exception('Завантажений файл пошкоджений: ' . $image->getErrorMessage());
+        }
+        
+        Log::info('Завантаження зображення обкладинки', [
+            'original_name' => $image->getClientOriginalName(),
+            'mime_type' => $image->getMimeType(),
+            'size' => $image->getSize()
+        ]);
+        
+        // Генерація унікального імені файлу
         $filename = 'course_' . time() . '_' . Str::random(10) . '.' . $image->getClientOriginalExtension();
         
+        // Збереження файлу
         $path = $image->storeAs('course-covers', $filename, 'public');
+        
+        Log::info('Зображення збережено', [
+            'path' => $path,
+            'full_path' => Storage::disk('public')->path($path),
+            'exists' => Storage::disk('public')->exists($path)
+        ]);
         
         return $path;
     }
