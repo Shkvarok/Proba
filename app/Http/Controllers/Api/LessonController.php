@@ -56,100 +56,203 @@ class LessonController extends Controller
     
     public function store(Request $request)
     {
-        $validator = Validator::make($request->all(), [
-            'module_id' => 'required|exists:modules,id',
-            'title' => 'required|string|max:255',
-            'description' => 'nullable|string',
-            'type' => 'required|in:lecture,test,extra_material',
-            'position' => 'nullable|integer|min:0',
-            'status' => 'nullable|in:active,disabled',
-            
-            // Поля для лекцій (або content, або file, але не обидва)
-            'file' => [
-                'nullable',
-                'file',
-                'max:1024000',
-                Rule::requiredIf(function () use ($request) {
-                    return $request->type === 'lecture' && empty($request->content);
-                }),
-            ],
-            'content' => [
-                'nullable',
-                'string',
-                Rule::requiredIf(function () use ($request) {
-                    return $request->type === 'lecture' && !$request->hasFile('file');
-                }),
-            ],
-            'duration_minutes' => 'nullable|integer|min:1',
-            
-            // Поля для тестів
-            'source_type' => 'nullable|in:url,internal',
-            'external_url' => 'nullable|url|required_if:source_type,url',
-            'time_limit_minutes' => 'nullable|integer|min:1',
-            'passing_score' => 'nullable|integer|min:0',
-            
-            // Поля для додаткових матеріалів
-            'material_type' => 'nullable|in:url,video,file,text,image|required_if:type,extra_material',
-            'material_file' => 'nullable|file|max:1024000|required_if:material_type,file,image,video',
-            'material_url' => 'nullable|url|required_if:material_type,url',
-            'material_content' => 'nullable|string|required_if:material_type,text',
-        ]);
-        
-        if ($validator->fails()) {
-            return response()->json([
-                'message' => 'Помилка валідації даних',
-                'errors' => $validator->errors()
-            ], 422);
-        }
-        
         try {
-            // Підготовка даних для сервісу
-            $data = $request->all();
+            \Illuminate\Support\Facades\Log::info('LessonController::store called', [
+                'request_data' => $request->except(['file', 'material_file']),
+                'has_file' => $request->hasFile('file'),
+                'has_material_file' => $request->hasFile('material_file'),
+                'content_type' => $request->header('Content-Type')
+            ]);
+
+            $validator = Validator::make($request->all(), [
+                'module_id' => 'required|exists:modules,id',
+                'title' => 'required|string|max:255',
+                'description' => 'nullable|string',
+                'type' => 'required|in:lecture,test,extra_material',
+                'position' => 'nullable|integer|min:0',
+                'status' => 'nullable|in:active,disabled',
+                
+                // Поля для лекцій (або content, або file, але не обидва)
+                'file' => [
+                    'nullable',
+                    'file',
+                    'max:102400', // Збільшено до 100MB
+                    Rule::requiredIf(function () use ($request) {
+                        return $request->type === 'lecture' && empty($request->content);
+                    }),
+                ],
+                'content' => [
+                    'nullable',
+                    'string',
+                    Rule::requiredIf(function () use ($request) {
+                        return $request->type === 'lecture' && !$request->hasFile('file');
+                    }),
+                ],
+                'duration_minutes' => 'nullable|integer|min:1',
+                
+                // Поля для тестів
+                'source_type' => 'nullable|in:url,internal',
+                'external_url' => 'nullable|url|required_if:source_type,url',
+                'time_limit_minutes' => 'nullable|integer|min:1',
+                'passing_score' => 'nullable|integer|min:0',
+                
+                // Поля для додаткових матеріалів
+                'material_type' => 'nullable|in:url,video,file,text,image|required_if:type,extra_material',
+                'material_file' => 'nullable|file|max:102400|required_if:material_type,file,image,video',
+                'material_url' => 'nullable|url|required_if:material_type,url',
+                'material_content' => 'nullable|string|required_if:material_type,text',
+            ]);
             
-            // Обробка файлу для лекції
-            if ($request->hasFile('file') && $request->type === 'lecture') {
-                $file = $request->file('file');
-                $fileName = time() . '_' . $file->getClientOriginalName();
-                $filePath = $file->storeAs('lessons/lectures', $fileName, 'public');
-                $data['file_path'] = $filePath;
-                $data['file_type'] = $file->getClientMimeType();
-                $data['file_name'] = $file->getClientOriginalName();
+            if ($validator->fails()) {
+                \Illuminate\Support\Facades\Log::error('LessonController::store validation failed', [
+                    'errors' => $validator->errors()->toArray()
+                ]);
+                return response()->json([
+                    'message' => 'Помилка валідації даних',
+                    'errors' => $validator->errors()
+                ], 422);
             }
             
-            // Обробка файлу для додаткового матеріалу
-            if ($request->hasFile('material_file') && $request->type === 'extra_material') {
-                $file = $request->file('material_file');
-                $fileName = time() . '_' . $file->getClientOriginalName();
+            try {
+                // Підготовка даних для сервісу
+                $data = $request->all();
                 
-                // Визначаємо шлях для зберігання залежно від типу матеріалу
-                $storagePath = 'lessons/materials';
-                if (isset($data['material_type'])) {
-                    switch ($data['material_type']) {
-                        case 'video':
-                            $storagePath = 'lessons/videos';
-                            break;
-                        case 'image':
-                            $storagePath = 'lessons/images';
-                            break;
+                // Обробка файлу для лекції
+                if ($request->hasFile('file') && $request->type === 'lecture') {
+                    $file = $request->file('file');
+                    
+                    \Illuminate\Support\Facades\Log::info('Processing lecture file', [
+                        'original_name' => $file->getClientOriginalName(),
+                        'mime_type' => $file->getMimeType(),
+                        'size' => $file->getSize(),
+                        'is_valid' => $file->isValid()
+                    ]);
+                    
+                    // Перевіряємо чи файл дійсно завантажений
+                    if (!$file->isValid()) {
+                        \Illuminate\Support\Facades\Log::error('Invalid lecture file upload', [
+                            'error' => $file->getErrorMessage()
+                        ]);
+                        return response()->json([
+                            'message' => 'Помилка завантаження файлу',
+                            'error' => $file->getErrorMessage()
+                        ], 422);
                     }
+                    
+                    $fileName = time() . '_' . $file->getClientOriginalName();
+                    $filePath = $file->storeAs('lessons/lectures', $fileName, 'public');
+                    
+                    \Illuminate\Support\Facades\Log::info('Lecture file stored', [
+                        'file_name' => $fileName,
+                        'file_path' => $filePath,
+                        'storage_exists' => \Illuminate\Support\Facades\Storage::disk('public')->exists($filePath)
+                    ]);
+                    
+                    // Перевіряємо чи файл успішно збережений
+                    if (!$filePath) {
+                        \Illuminate\Support\Facades\Log::error('Failed to store lecture file');
+                        return response()->json([
+                            'message' => 'Помилка збереження файлу'
+                        ], 500);
+                    }
+                    
+                    $data['file_path'] = $filePath;
+                    $data['file_type'] = $file->getClientMimeType();
+                    $data['file_name'] = $file->getClientOriginalName();
+                    $data['content_type'] = 'file';
                 }
                 
-                $filePath = $file->storeAs($storagePath, $fileName, 'public');
-                $data['file_path'] = $filePath;
-                $data['file_type'] = $file->getClientMimeType();
-                $data['file_name'] = $file->getClientOriginalName();
+                // Обробка файлу для додаткового матеріалу
+                if ($request->hasFile('material_file') && $request->type === 'extra_material') {
+                    $file = $request->file('material_file');
+                    
+                    \Illuminate\Support\Facades\Log::info('Processing material file', [
+                        'original_name' => $file->getClientOriginalName(),
+                        'mime_type' => $file->getMimeType(),
+                        'size' => $file->getSize(),
+                        'is_valid' => $file->isValid()
+                    ]);
+                    
+                    // Перевіряємо чи файл дійсно завантажений
+                    if (!$file->isValid()) {
+                        \Illuminate\Support\Facades\Log::error('Invalid material file upload', [
+                            'error' => $file->getErrorMessage()
+                        ]);
+                        return response()->json([
+                            'message' => 'Помилка завантаження файлу матеріалу',
+                            'error' => $file->getErrorMessage()
+                        ], 422);
+                    }
+                    
+                    $fileName = time() . '_' . $file->getClientOriginalName();
+                    $filePath = $file->storeAs('lessons/materials', $fileName, 'public');
+                    
+                    \Illuminate\Support\Facades\Log::info('Material file stored', [
+                        'file_name' => $fileName,
+                        'file_path' => $filePath,
+                        'storage_exists' => \Illuminate\Support\Facades\Storage::disk('public')->exists($filePath)
+                    ]);
+                    
+                    // Перевіряємо чи файл успішно збережений
+                    if (!$filePath) {
+                        \Illuminate\Support\Facades\Log::error('Failed to store material file');
+                        return response()->json([
+                            'message' => 'Помилка збереження файлу матеріалу'
+                        ], 500);
+                    }
+                    
+                    $data['material_file_path'] = $filePath;
+                    $data['material_file_type'] = $file->getClientMimeType();
+                    $data['material_file_name'] = $file->getClientOriginalName();
+                }
+                
+                \Illuminate\Support\Facades\Log::info('Creating lesson with data', [
+                    'data' => array_merge(
+                        $data,
+                        ['file_path' => $data['file_path'] ?? null],
+                        ['material_file_path' => $data['material_file_path'] ?? null]
+                    )
+                ]);
+                
+                // Створюємо урок через сервіс
+                $lesson = $this->lessonService->createLesson($data);
+                
+                \Illuminate\Support\Facades\Log::info('Lesson created successfully', [
+                    'lesson_id' => $lesson->id,
+                    'title' => $lesson->title,
+                    'type' => $lesson->type
+                ]);
+                
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Урок успішно створено',
+                    'lesson' => $lesson
+                ]);
+                
+            } catch (\Exception $e) {
+                // Логуємо помилку
+                \Illuminate\Support\Facades\Log::error('Помилка створення уроку: ' . $e->getMessage(), [
+                    'request' => $request->except(['file', 'material_file']),
+                    'error' => $e->getMessage(),
+                    'trace' => $e->getTraceAsString()
+                ]);
+                
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Помилка при створенні уроку',
+                    'error' => $e->getMessage()
+                ], 500);
             }
-            
-            $lesson = $this->lessonService->createLesson($data);
-            
-            return response()->json([
-                'message' => 'Урок успішно створено',
-                'lesson' => $lesson
-            ], 201);
-            
         } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::error('Критична помилка при створенні уроку: ' . $e->getMessage(), [
+                'request' => $request->except(['file', 'material_file']),
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            
             return response()->json([
-                'message' => 'Помилка при створенні уроку',
+                'success' => false,
+                'message' => 'Критична помилка при створенні уроку',
                 'error' => $e->getMessage()
             ], 500);
         }
