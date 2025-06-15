@@ -174,16 +174,31 @@ Route::prefix('levels')->group(function () {
 
 // Курси (публічний доступ)
 Route::prefix('courses')->group(function () {
+    // СТАРИЙ API (з повною інформацією для сумісності з фронтендом)
     Route::get('/', [CourseController::class, 'index']);
-    Route::get('/search', [CourseController::class, 'search']);
-    Route::get('/popular', [CourseController::class, 'getPopular']);
-    Route::get('/featured', [CourseController::class, 'getFeatured']);
-    Route::get('/category/{categoryId}', [CourseController::class, 'getByCategory'])->where('categoryId', '[0-9]+');
-    Route::get('/level/{levelId}', [CourseController::class, 'getByLevel'])->where('levelId', '[0-9]+');
-    Route::get('/instructor/{instructorId}', [CourseController::class, 'getByInstructor'])->where('instructorId', '[0-9]+');
-    Route::get('/{courseId}/modules', [ModuleController::class, 'index'])->where('courseId', '[0-9]+');
-    Route::get('/{id}', [CourseController::class, 'show'])->where('id', '[0-9]+');
     
+    // НОВИЙ API (тільки базова інформація про курси, БЕЗ модулів/уроків)
+    Route::get('/only', [CourseController::class, 'indexOnly']);    
+    // Пошук курсів
+    Route::get('/search', [CourseController::class, 'search']);
+    // Популярні курси
+    Route::get('/popular', [CourseController::class, 'getPopular']);
+    // Рекомендовані курси
+    Route::get('/featured', [CourseController::class, 'getFeatured']);
+    // Курси за категорією
+    Route::get('/category/{categoryId}', [CourseController::class, 'getByCategory'])->where('categoryId', '[0-9]+');
+    // Курси за рівнем складності
+    Route::get('/level/{levelId}', [CourseController::class, 'getByLevel'])->where('levelId', '[0-9]+');
+    // Курси за інструктором
+    Route::get('/instructor/{instructorId}', [CourseController::class, 'getByInstructor'])->where('instructorId', '[0-9]+');
+    // Базова інформація про курс (без модулів/уроків)
+    Route::get('/{id}', [CourseController::class, 'show'])->where('id', '[0-9]+');
+    // Повна інформація про курс (з модулями і уроками) - може вимагати авторизації
+    Route::get('/{id}/content', [CourseController::class, 'showWithContent'])->where('id', '[0-9]+');
+    // Статистика контенту курсу
+    Route::get('/{id}/stats', [CourseController::class, 'getContentStats'])->where('id', '[0-9]+');
+    // Модулі курсу (без уроків)
+    Route::get('/{courseId}/modules', [ModuleController::class, 'index'])->where('courseId', '[0-9]+');
     // Публічний доступ до відгуків курсу
     Route::get('/{courseId}/reviews', [ReviewController::class, 'getCourseReviews']);
 });
@@ -214,6 +229,9 @@ Route::prefix('payments')->group(function () {
 // ========================================
 
 Route::middleware('auth:sanctum')->group(function () {
+
+     // Перевірка доступу користувача до курсу
+    Route::get('/courses/{id}/access', [CourseController::class, 'checkUserAccess'])->where('id', '[0-9]+');
     
     // ========================================
     // БАЗОВІ МАРШРУТИ АВТЕНТИФІКАЦІЇ
@@ -430,6 +448,14 @@ Route::middleware('auth:sanctum')->group(function () {
     });
     
     // ========================================
+    // ТІЛЬКИ ДЛЯ АДМІНІСТРАТОРІВ
+    // ========================================
+    Route::middleware([CheckRole::class . ':admin,super_admin'])->group(function () {
+        // Загальна статистика курсів
+        Route::get('/admin/courses/statistics', [CourseController::class, 'getStatistics']);
+    });
+
+    // ========================================
     // ДЛЯ ВИКЛАДАЧІВ ТА АДМІНІСТРАТОРІВ
     // ========================================
     Route::middleware([CheckRole::class . ':teacher,admin,super_admin'])->group(function () {
@@ -438,19 +464,46 @@ Route::middleware('auth:sanctum')->group(function () {
         // УПРАВЛІННЯ КУРСАМИ
         // ========================================
         Route::prefix('courses/manage')->group(function () {
+            // Мої курси
             Route::get('/', [CourseController::class, 'getMyCourses']);
+            
+            // Створити новий курс
             Route::post('/', [CourseController::class, 'store']);
             
-            // Підтримка як PUT, так і POST з _method=PUT для файлових запитів
+            // Оновити курс (підтримка PUT і POST з _method=PUT)
             Route::match(['PUT', 'POST'], '/{id}', [CourseController::class, 'update'])
                 ->where('id', '[0-9]+');
-                  
-            Route::delete('/{id}', [CourseController::class, 'destroy'])->where('id', '[0-9]+');
-            Route::put('/{id}/publish', [CourseController::class, 'publish'])->where('id', '[0-9]+');
-            Route::put('/{id}/unpublish', [CourseController::class, 'unpublish'])->where('id', '[0-9]+');
+            
+            // Оновити тільки обкладинку курсу
+            Route::post('/{id}/cover', [CourseController::class, 'updateCover'])
+                ->where('id', '[0-9]+');
+            
+            // Видалити курс
+            Route::delete('/{id}', [CourseController::class, 'destroy'])
+                ->where('id', '[0-9]+');
+            
+            // Клонувати курс
+            Route::post('/{id}/clone', [CourseController::class, 'cloneCourse'])
+                ->where('id', '[0-9]+');
+            
+            // Перевірити готовність до публікації
+            Route::get('/{id}/publication-check', [CourseController::class, 'checkPublicationReadiness'])
+                ->where('id', '[0-9]+');
+            
+            // Опублікувати курс
+            Route::put('/{id}/publish', [CourseController::class, 'publish'])
+                ->where('id', '[0-9]+');
+            
+            // Зняти з публікації
+            Route::put('/{id}/unpublish', [CourseController::class, 'unpublish'])
+                ->where('id', '[0-9]+');
             
             // Масові операції
             Route::post('/bulk-action', [CourseController::class, 'bulkAction']);
+            
+            // Аналітика конкретного курсу (для власника/адміна)
+            Route::get('/{id}/analytics', [CourseController::class, 'getContentStats'])
+                ->where('id', '[0-9]+');
         });
         
         // ========================================
@@ -574,6 +627,85 @@ Route::middleware('auth:sanctum')->group(function () {
         // СТАТИСТИКА ПЛАТЕЖІВ ТА КУРСІВ
         // ========================================
         Route::get('/admin/payment-stats', [PaymentController::class, 'getPaymentStats']);
-        Route::get('/admin/courses/statistics', [CourseController::class, 'getStatistics']);
+    });
+
+    
+    // ========================================
+    // ДОДАТКОВІ ТЕСТОВІ МАРШРУТИ (для розробки)
+    // ========================================
+
+    Route::get('/test-course-creation', function() {
+        return response()->json([
+            'message' => 'Тестовий маршрут для перевірки створення курсів',
+            'timestamp' => now(),
+            'user' => auth()->user() ? [
+                'id' => auth()->id(),
+                'email' => auth()->user()->email,
+                'role' => auth()->user()->role->name ?? 'no_role'
+            ] : null
+        ]);
+    });
+
+    Route::middleware('auth:sanctum')->post('/test-course-upload', function(Request $request) {
+        return response()->json([
+            'method' => $request->method(),
+            'content_type' => $request->header('Content-Type'),
+            'has_file' => $request->hasFile('cover_image'),
+            'all_data' => $request->except(['cover_image']),
+            'file_info' => $request->hasFile('cover_image') ? [
+                'name' => $request->file('cover_image')->getClientOriginalName(),
+                'size' => $request->file('cover_image')->getSize(),
+                'mime' => $request->file('cover_image')->getMimeType()
+            ] : null
+        ]);
+    });
+
+    Route::middleware('auth:sanctum')->post('/test-form-data', function(Request $request) {
+        return response()->json([
+            'method' => $request->method(),
+            'content_type' => $request->header('Content-Type'),
+            'has_method_field' => $request->has('_method'),
+            '_method_value' => $request->input('_method'),
+            'all_data' => $request->except(['cover_image']),
+            'all_files' => array_keys($request->allFiles()),
+            'has_cover_image' => $request->hasFile('cover_image'),
+            'price_type' => gettype($request->input('price')),
+            'price_value' => $request->input('price'),
+            'is_published_type' => gettype($request->input('is_published')),
+            'is_published_value' => $request->input('is_published'),
+        ]);
+    });
+
+    // Тестовий маршрут PUT через POST
+    Route::middleware('auth:sanctum')->match(['PUT', 'POST'], '/test-put-course/{id}', function(Request $request, $id) {
+        Log::info('Test PUT course called', [
+            'id' => $id,
+            'method' => $request->method(),
+            'has_method' => $request->has('_method'),
+            'method_value' => $request->input('_method'),
+            'all_data' => $request->except(['cover_image'])
+        ]);
+
+        // Симулюємо CourseRequest логіку
+        $data = $request->only([
+            'title', 'description', 'category_id', 'instructor_id', 'price',
+            'discount_price', 'level_id', 'language', 'promo_video_url',
+            'requirements', 'what_you_learn', 'is_published'
+        ]);
+
+        // Фільтруємо тільки поля які прийшли
+        $filteredData = array_filter($data, function($value, $key) use ($request) {
+            return $request->has($key);
+        }, ARRAY_FILTER_USE_BOTH);
+
+        return response()->json([
+            'success' => true,
+            'course_id' => $id,
+            'method' => $request->method(),
+            'received_data' => $data,
+            'filtered_data' => $filteredData,
+            'fields_present' => array_keys($request->except(['_token', '_method', 'cover_image'])),
+            'would_update' => !empty($filteredData) ? 'Yes' : 'No (no data to update)'
+        ]);
     });
 });

@@ -27,17 +27,17 @@ class CourseController extends Controller
     }
 
     /**
-     * Display a listing of the courses.
+     * Display a listing of the courses (без модулів і уроків).
      */
     public function index(Request $request): JsonResponse|AnonymousResourceCollection
     {
         try {
-            Log::info('Початок виконання методу index', [
+            Log::info('Початок виконання методу index (повна версія)', [
                 'user_id' => auth()->id(),
                 'params' => $request->all()
             ]);
             
-            $perPage = $request->input('per_page', 15);
+            $perPage = min($request->input('per_page', 15), 100); // Максимум 100
             $onlyPublished = $request->boolean('published', false);
             
             if ($onlyPublished) {
@@ -45,12 +45,64 @@ class CourseController extends Controller
             } else {
                 $courses = $this->courseService->getAllCourses($perPage);
             }
+
+            // Завантажуємо всі відносини включно з модулями і уроками для повної сумісності
+            $courses->load([
+                'category', 
+                'instructor', 
+                'level',
+                'modules' => function($query) {
+                    $query->orderBy('position');
+                },
+                'modules.lessons' => function($query) {
+                    $query->orderBy('position');
+                }
+            ]);
             
-            Log::info('Курси отримано успішно', ['count' => $courses->count()]);
+            Log::info('Курси отримано успішно (повна версія)', ['count' => $courses->count()]);
             return CourseResource::collection($courses);
             
         } catch (Exception $e) {
             Log::error('Помилка в методі index', [
+                'message' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Помилка при отриманні списку курсів: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+     /**
+     * Display a listing of the courses (тільки базова інформація, без модулів і уроків).
+     */
+    public function indexOnly(Request $request): JsonResponse|AnonymousResourceCollection
+    {
+        try {
+            Log::info('Початок виконання методу indexOnly', [
+                'user_id' => auth()->id(),
+                'params' => $request->all()
+            ]);
+            
+            $perPage = min($request->input('per_page', 15), 100); // Максимум 100
+            $onlyPublished = $request->boolean('published', false);
+            
+            if ($onlyPublished) {
+                $courses = $this->courseService->getPublishedCourses($perPage);
+            } else {
+                $courses = $this->courseService->getAllCourses($perPage);
+            }
+
+            // Завантажуємо тільки базові відносини
+            $courses->load(['category', 'instructor', 'level']);
+            
+            Log::info('Курси отримано успішно (тільки базова інформація)', ['count' => $courses->count()]);
+            return CourseResource::collection($courses);
+            
+        } catch (Exception $e) {
+            Log::error('Помилка в методі indexOnly', [
                 'message' => $e->getMessage(),
                 'trace' => $e->getTraceAsString()
             ]);
@@ -73,17 +125,31 @@ class CourseController extends Controller
             Log::info('=== СТВОРЕННЯ КУРСУ ===', [
                 'user_id' => auth()->id(),
                 'request_data' => $request->except(['cover_image']),
-                'has_cover_image' => $request->hasFile('cover_image')
+                'has_cover_image' => $request->hasFile('cover_image'),
+                'content_type' => $request->header('Content-Type')
             ]);
             
             // Отримуємо дані курсу
             $courseData = $request->getCourseData();
             
+            // Якщо instructor_id не вказано, використовуємо поточного користувача
+            if (!isset($courseData['instructor_id'])) {
+                $courseData['instructor_id'] = auth()->id();
+            }
+            
             // Обробляємо завантаження зображення
             $coverImage = $request->hasFile('cover_image') ? $request->file('cover_image') : null;
             
+            Log::info('Дані для створення курсу:', [
+                'course_data' => $courseData,
+                'has_image' => $coverImage !== null
+            ]);
+            
             // Створюємо курс через сервіс
             $course = $this->courseService->createCourse($courseData, $coverImage);
+            
+            // Завантажуємо відносини для відповіді
+            $course->load(['category', 'instructor', 'level']);
             
             DB::commit();
             
@@ -103,31 +169,75 @@ class CourseController extends Controller
             Log::error('Помилка при створенні курсу', [
                 'message' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
-                'user_id' => auth()->id()
+                'user_id' => auth()->id(),
+                'request_data' => $request->except(['cover_image'])
             ]);
             
             return response()->json([
                 'success' => false,
-                'message' => 'Помилка при створенні курсу: ' . $e->getMessage()
+                'message' => 'Помилка при створенні курсу: ' . $e->getMessage(),
+                'errors' => []
             ], 500);
         }
     }
 
     /**
-     * Display the specified course.
+     * Display the specified course (з базовою інформацією).
      */
     public function show(int $id): JsonResponse
     {
         try {
             $course = $this->courseService->getCourseById($id);
             
+            // Завантажуємо базові відносини
+            $course->load(['category', 'instructor', 'level']);
+            
             return response()->json([
                 'success' => true,
-                'course' => $this->formatCourseData($course)
+                'course' => new CourseResource($course)
             ]);
             
         } catch (Exception $e) {
             Log::error('Помилка при отриманні курсу', [
+                'course_id' => $id,
+                'message' => $e->getMessage()
+            ]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Курс не знайдено або виникла помилка: ' . $e->getMessage()
+            ], $e->getCode() == 404 ? 404 : 500);
+        }
+    }
+
+    /**
+     * Display the specified course з модулями і уроками.
+     */
+    public function showWithContent(int $id): JsonResponse
+    {
+        try {
+            $course = $this->courseService->getCourseById($id);
+            
+            // Завантажуємо всі відносини включно з модулями і уроками
+            $course->load([
+                'category', 
+                'instructor', 
+                'level',
+                'modules' => function($query) {
+                    $query->orderBy('position');
+                },
+                'modules.lessons' => function($query) {
+                    $query->orderBy('position');
+                }
+            ]);
+            
+            return response()->json([
+                'success' => true,
+                'course' => new CourseResource($course)
+            ]);
+            
+        } catch (Exception $e) {
+            Log::error('Помилка при отриманні курсу з контентом', [
                 'course_id' => $id,
                 'message' => $e->getMessage()
             ]);
@@ -151,7 +261,9 @@ class CourseController extends Controller
                 'course_id' => $id,
                 'user_id' => auth()->id(),
                 'request_data' => $request->except(['cover_image']),
-                'has_cover_image' => $request->hasFile('cover_image')
+                'has_cover_image' => $request->hasFile('cover_image'),
+                'method' => $request->method(),
+                'content_type' => $request->header('Content-Type')
             ]);
             
             $course = $this->courseService->getCourseById($id);
@@ -167,8 +279,16 @@ class CourseController extends Controller
             $courseData = $request->getCourseData();
             $coverImage = $request->hasFile('cover_image') ? $request->file('cover_image') : null;
             
+            Log::info('Дані для оновлення курсу:', [
+                'course_data' => $courseData,
+                'has_image' => $coverImage !== null
+            ]);
+            
             // Оновлюємо курс через сервіс
             $updatedCourse = $this->courseService->updateCourse($course, $courseData, $coverImage);
+            
+            // Завантажуємо відносини для відповіді
+            $updatedCourse->load(['category', 'instructor', 'level']);
             
             DB::commit();
             
@@ -178,7 +298,11 @@ class CourseController extends Controller
                 'cover_image' => $updatedCourse->cover_image
             ]);
             
-            return new CourseResource($updatedCourse);
+            return response()->json([
+                'success' => true,
+                'message' => 'Курс успішно оновлено',
+                'course' => new CourseResource($updatedCourse)
+            ]);
             
         } catch (Exception $e) {
             DB::rollBack();
@@ -186,12 +310,14 @@ class CourseController extends Controller
             Log::error('Помилка при оновленні курсу', [
                 'course_id' => $id,
                 'message' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
+                'trace' => $e->getTraceAsString(),
+                'request_data' => $request->except(['cover_image'])
             ]);
             
             return response()->json([
                 'success' => false,
-                'message' => 'Помилка при оновленні курсу: ' . $e->getMessage()
+                'message' => 'Помилка при оновленні курсу: ' . $e->getMessage(),
+                'errors' => []
             ], 500);
         }
     }
@@ -246,51 +372,15 @@ class CourseController extends Controller
     /**
      * Get courses for the authenticated instructor.
      */
-    public function getMyCourses(): AnonymousResourceCollection
+    public function getMyCourses(Request $request): AnonymousResourceCollection
     {
         $userId = auth()->id();
-        $courses = $this->courseService->getCoursesByInstructorId($userId);
+        $perPage = min($request->input('per_page', 15), 100);
+        
+        $courses = $this->courseService->getCoursesByInstructorId($userId, $perPage);
+        $courses->load(['category', 'instructor', 'level']);
         
         return CourseResource::collection($courses);
-    }
-    
-    /**
-     * Get enrolled courses for the authenticated student.
-     */
-    public function getEnrolledCourses(): AnonymousResourceCollection
-    {
-        $userId = auth()->id();
-        $courses = $this->courseService->getEnrolledCoursesByUserId($userId);
-        
-        return CourseResource::collection($courses);
-    }
-    
-    /**
-     * Get course progress for the authenticated user.
-     */
-    public function getCourseProgress(int $courseId): JsonResponse
-    {
-        try {
-            $userId = auth()->id();
-            $progress = $this->courseService->getCourseProgressForUser($userId, $courseId);
-            
-            return response()->json([
-                'success' => true,
-                'progress' => $progress
-            ]);
-            
-        } catch (Exception $e) {
-            Log::error('Помилка при отриманні прогресу курсу', [
-                'course_id' => $courseId,
-                'user_id' => auth()->id(),
-                'message' => $e->getMessage()
-            ]);
-            
-            return response()->json([
-                'success' => false,
-                'message' => 'Помилка при отриманні прогресу: ' . $e->getMessage()
-            ], 500);
-        }
     }
 
     /**
@@ -309,7 +399,6 @@ class CourseController extends Controller
                 'is_free' => 'nullable|boolean',
                 'instructor_id' => 'nullable|integer|exists:users,id',
                 'language' => 'nullable|string|max:50',
-                'difficulty_level' => 'nullable|in:beginner,intermediate,advanced',
                 'sort_by' => 'nullable|in:created_at,title,price,updated_at',
                 'sort_direction' => 'nullable|in:asc,desc'
             ]);
@@ -318,7 +407,7 @@ class CourseController extends Controller
             $perPage = $request->input('per_page', 15);
             $filters = $request->only([
                 'category_id', 'level_id', 'price_min', 'price_max', 'is_free',
-                'instructor_id', 'language', 'difficulty_level', 'sort_by', 'sort_direction'
+                'instructor_id', 'language', 'sort_by', 'sort_direction'
             ]);
             
             // Використовуємо метод з фільтрами, якщо є фільтри, інакше простий пошук
@@ -327,6 +416,8 @@ class CourseController extends Controller
             } else {
                 $courses = $this->courseService->searchCourses($query, $perPage);
             }
+
+            $courses->load(['category', 'instructor', 'level']);
             
             return CourseResource::collection($courses);
             
@@ -349,8 +440,9 @@ class CourseController extends Controller
     public function getByCategory(int $categoryId, Request $request): JsonResponse|AnonymousResourceCollection
     {
         try {
-            $perPage = $request->input('per_page', 15);
+            $perPage = min($request->input('per_page', 15), 100);
             $courses = $this->courseService->getCoursesByCategory($categoryId, $perPage);
+            $courses->load(['category', 'instructor', 'level']);
             
             return CourseResource::collection($courses);
             
@@ -368,8 +460,9 @@ class CourseController extends Controller
     public function getByLevel(int $levelId, Request $request): JsonResponse|AnonymousResourceCollection
     {
         try {
-            $perPage = $request->input('per_page', 15);
+            $perPage = min($request->input('per_page', 15), 100);
             $courses = $this->courseService->getCoursesByLevel($levelId, $perPage);
+            $courses->load(['category', 'instructor', 'level']);
             
             return CourseResource::collection($courses);
             
@@ -387,8 +480,9 @@ class CourseController extends Controller
     public function getByInstructor(int $instructorId, Request $request): JsonResponse|AnonymousResourceCollection
     {
         try {
-            $perPage = $request->input('per_page', 15);
+            $perPage = min($request->input('per_page', 15), 100);
             $courses = $this->courseService->getCoursesByInstructor($instructorId, $perPage);
+            $courses->load(['category', 'instructor', 'level']);
             
             return CourseResource::collection($courses);
             
@@ -406,10 +500,10 @@ class CourseController extends Controller
     public function getPopular(Request $request): AnonymousResourceCollection
     {
         try {
-            $limit = $request->input('limit', 10);
-            $limit = min($limit, 50); // Максимум 50 курсів
+            $limit = min($request->input('limit', 10), 50);
             
             $courses = $this->courseService->getPopularCourses($limit);
+            $courses->load(['category', 'instructor', 'level']);
             
             return CourseResource::collection($courses);
             
@@ -428,39 +522,15 @@ class CourseController extends Controller
     public function getFeatured(Request $request): AnonymousResourceCollection
     {
         try {
-            $limit = $request->input('limit', 6);
-            $limit = min($limit, 20); // Максимум 20 курсів
+            $limit = min($request->input('limit', 6), 20);
             
             $courses = $this->courseService->getFeaturedCourses($limit);
+            $courses->load(['category', 'instructor', 'level']);
             
             return CourseResource::collection($courses);
             
         } catch (Exception $e) {
             Log::error('Помилка при отриманні рекомендованих курсів', [
-                'message' => $e->getMessage()
-            ]);
-            
-            return CourseResource::collection(collect([]));
-        }
-    }
-
-    /**
-     * Get recommended courses for authenticated user
-     */
-    public function getRecommended(Request $request): AnonymousResourceCollection
-    {
-        try {
-            $userId = auth()->id();
-            $limit = $request->input('limit', 5);
-            $limit = min($limit, 20);
-            
-            $courses = $this->courseService->getRecommendedCourses($userId, $limit);
-            
-            return CourseResource::collection($courses);
-            
-        } catch (Exception $e) {
-            Log::error('Помилка при отриманні рекомендованих курсів', [
-                'user_id' => auth()->id(),
                 'message' => $e->getMessage()
             ]);
             
@@ -582,7 +652,7 @@ class CourseController extends Controller
     /**
      * Publish a course.
      */
-    public function publish(int $id): JsonResponse|CourseResource
+    public function publish(int $id): JsonResponse
     {
         try {
             $course = $this->courseService->getCourseById($id);
@@ -596,13 +666,18 @@ class CourseController extends Controller
             }
             
             $publishedCourse = $this->courseService->publishCourse($course);
+            $publishedCourse->load(['category', 'instructor', 'level']);
             
             Log::info('Курс опубліковано', [
                 'course_id' => $id,
                 'published_by' => auth()->id()
             ]);
             
-            return new CourseResource($publishedCourse);
+            return response()->json([
+                'success' => true,
+                'message' => 'Курс успішно опубліковано',
+                'course' => new CourseResource($publishedCourse)
+            ]);
             
         } catch (Exception $e) {
             Log::error('Помилка при публікації курсу', [
@@ -620,7 +695,7 @@ class CourseController extends Controller
     /**
      * Unpublish a course.
      */
-    public function unpublish(int $id): JsonResponse|CourseResource
+    public function unpublish(int $id): JsonResponse
     {
         try {
             $course = $this->courseService->getCourseById($id);
@@ -634,13 +709,18 @@ class CourseController extends Controller
             }
             
             $unpublishedCourse = $this->courseService->unpublishCourse($course);
+            $unpublishedCourse->load(['category', 'instructor', 'level']);
             
             Log::info('Курс знято з публікації', [
                 'course_id' => $id,
                 'unpublished_by' => auth()->id()
             ]);
             
-            return new CourseResource($unpublishedCourse);
+            return response()->json([
+                'success' => true,
+                'message' => 'Курс успішно знято з публікації',
+                'course' => new CourseResource($unpublishedCourse)
+            ]);
             
         } catch (Exception $e) {
             Log::error('Помилка при знятті курсу з публікації', [
@@ -656,120 +736,447 @@ class CourseController extends Controller
     }
 
     /**
-     * Format course data for response.
+     * Get course content statistics
      */
-     private function formatCourseData($course): array
+    public function getContentStats(int $id): JsonResponse
     {
-        $courseData = [
-            'id' => $course->id,
-            'title' => $course->title,
-            'description' => $course->description,
-            'price' => $course->price,
-            'discount_price' => $course->discount_price,
-            'discount_expires_at' => $course->discount_expires_at,
-            'is_published' => $course->is_published,
-            'cover_image' => $course->cover_image ? Storage::disk('public')->url($course->cover_image) : null, // ← Змінено
-            'promo_video_url' => $course->promo_video_url,
-            'requirements' => $course->requirements,
-            'what_you_learn' => $course->what_you_learn,
-            'language' => $course->language,
-            'meta_title' => $course->meta_title,
-            'meta_description' => $course->meta_description,
-            'created_at' => $course->created_at,
-            'updated_at' => $course->updated_at,
-            'category' => $course->category ? [
-                'id' => $course->category->id,
-                'name' => $course->category->name,
-                'slug' => $course->category->slug ?? null
-            ] : null,
-            'level' => $course->level ? [
-                'id' => $course->level->id,
-                'name' => $course->level->name
-            ] : null,
-            'instructor' => $course->instructor ? [
-                'id' => $course->instructor->id,
-                'name' => $course->instructor->name,
-                'email' => $course->instructor->email
-            ] : null,
-            'modules' => []
-        ];
+        try {
+            $course = $this->courseService->getCourseById($id);
+            
+            $stats = [
+                'modules_count' => $course->modules()->count(),
+                'lessons_count' => \App\Models\Lesson::whereHas('module', function($query) use ($id) {
+                    $query->where('course_id', $id);
+                })->count(),
+                'tests_count' => \App\Models\InternalTest::whereHas('lesson.module', function($query) use ($id) {
+                    $query->where('course_id', $id);
+                })->count(),
+                'total_duration' => $this->courseService->calculateCourseDuration($id),
+                'completion_rate' => $this->courseService->getCourseCompletionRate($id),
+                'enrollments_count' => $course->enrollments()->where('is_active', true)->count()
+            ];
+            
+            return response()->json([
+                'success' => true,
+                'stats' => $stats
+            ]);
+            
+        } catch (Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Помилка при отриманні статистики курсу: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+
+    /**
+ * Перевірити готовність курсу до публікації
+ */
+public function checkPublicationReadiness(int $id): JsonResponse
+{
+    try {
+        $course = $this->courseService->getCourseById($id);
         
-        // Додаємо модулі з уроками (якщо завантажені)
-        if ($course->relationLoaded('modules')) {
-            foreach ($course->modules as $module) {
-                $moduleData = [
-                    'id' => $module->id,
-                    'title' => $module->title,
-                    'description' => $module->description,
-                    'position' => $module->position,
-                    'lessons' => []
+        // Перевірка прав доступу
+        if (!$this->courseService->canUserManageCourse(auth()->id(), $id)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'У вас немає прав для перевірки цього курсу'
+            ], 403);
+        }
+        
+        $isReady = $course->isReadyForPublication();
+        $requirements = $course->getPublicationRequirements();
+        
+        return response()->json([
+            'success' => true,
+            'is_ready' => $isReady,
+            'requirements' => $requirements,
+            'current_status' => $course->is_published ? 'published' : 'draft'
+        ]);
+        
+    } catch (Exception $e) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Помилка при перевірці готовності курсу: ' . $e->getMessage()
+        ], 500);
+    }
+}
+
+/**
+ * Отримати список курсів з мінімальною інформацією (для селектів)
+ */
+public function getCoursesSimple(Request $request): JsonResponse
+{
+    try {
+        $request->validate([
+            'search' => 'nullable|string|max:100',
+            'published_only' => 'nullable|boolean',
+            'instructor_id' => 'nullable|integer|exists:users,id',
+            'limit' => 'nullable|integer|min:1|max:100'
+        ]);
+        
+        $query = \App\Models\Course::select(['id', 'title', 'is_published', 'instructor_id']);
+        
+        if ($request->filled('search')) {
+            $query->where('title', 'LIKE', '%' . $request->search . '%');
+        }
+        
+        if ($request->boolean('published_only')) {
+            $query->published();
+        }
+        
+        if ($request->filled('instructor_id')) {
+            $query->where('instructor_id', $request->instructor_id);
+        }
+        
+        $limit = min($request->input('limit', 50), 100);
+        $courses = $query->limit($limit)->get();
+        
+        return response()->json([
+            'success' => true,
+            'courses' => $courses->map(function($course) {
+                return [
+                    'id' => $course->id,
+                    'title' => $course->title,
+                    'is_published' => $course->is_published,
+                    'instructor_id' => $course->instructor_id
                 ];
+            })
+        ]);
+        
+    } catch (Exception $e) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Помилка при отриманні списку курсів: ' . $e->getMessage()
+        ], 500);
+    }
+}
+
+/**
+ * Клонувати курс
+ */
+public function cloneCourse(int $id): JsonResponse
+{
+    DB::beginTransaction();
+    
+    try {
+        $originalCourse = $this->courseService->getCourseById($id);
+        
+        // Перевірка прав доступу
+        if (!$this->courseService->canUserManageCourse(auth()->id(), $id)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'У вас немає прав для клонування цього курсу'
+            ], 403);
+        }
+        
+        // Створюємо копію курсу
+        $clonedCourse = $originalCourse->replicate();
+        $clonedCourse->title = $originalCourse->title . ' (Копія)';
+        $clonedCourse->is_published = false;
+        $clonedCourse->instructor_id = auth()->id();
+        $clonedCourse->cover_image = null; // Обкладинку не копіюємо
+        $clonedCourse->save();
+        
+        // Копіюємо модулі
+        $originalCourse->load('modules.lessons');
+        foreach ($originalCourse->modules as $module) {
+            $clonedModule = $module->replicate();
+            $clonedModule->course_id = $clonedCourse->id;
+            $clonedModule->save();
+            
+            // Копіюємо уроки
+            foreach ($module->lessons as $lesson) {
+                $clonedLesson = $lesson->replicate();
+                $clonedLesson->module_id = $clonedModule->id;
+                $clonedLesson->save();
                 
-                if ($module->relationLoaded('lessons')) {
-                    foreach ($module->lessons as $lesson) {
-                        $lessonData = [
-                            'id' => $lesson->id,
-                            'title' => $lesson->title,
-                            'description' => $lesson->description,
-                            'type' => $lesson->type,
-                            'position' => $lesson->position,
-                            'status' => $lesson->status
-                        ];
-                        
-                        // Додаємо специфічні деталі уроку
-                        $this->addLessonTypeData($lessonData, $lesson);
-                        
-                        $moduleData['lessons'][] = $lessonData;
-                    }
+                // Копіюємо специфічний контент уроків
+                if ($lesson->type === 'lecture' && $lesson->lecture) {
+                    $clonedLecture = $lesson->lecture->replicate();
+                    $clonedLecture->lesson_id = $clonedLesson->id;
+                    $clonedLecture->save();
                 }
                 
-                $courseData['modules'][] = $moduleData;
+                if ($lesson->type === 'test' && $lesson->test) {
+                    $clonedTest = $lesson->test->replicate();
+                    $clonedTest->lesson_id = $clonedLesson->id;
+                    $clonedTest->save();
+                }
+                
+                if ($lesson->type === 'extra_material' && $lesson->extraMaterial) {
+                    $clonedMaterial = $lesson->extraMaterial->replicate();
+                    $clonedMaterial->lesson_id = $clonedLesson->id;
+                    $clonedMaterial->file_path = null; // Файли не копіюємо
+                    $clonedMaterial->save();
+                }
             }
         }
         
-        return $courseData;
+        $clonedCourse->load(['category', 'instructor', 'level']);
+        
+        DB::commit();
+        
+        Log::info('Курс успішно клоновано', [
+            'original_course_id' => $id,
+            'cloned_course_id' => $clonedCourse->id,
+            'cloned_by' => auth()->id()
+        ]);
+        
+        return response()->json([
+            'success' => true,
+            'message' => 'Курс успішно клоновано',
+            'course' => new CourseResource($clonedCourse)
+        ], 201);
+        
+    } catch (Exception $e) {
+        DB::rollBack();
+        
+        Log::error('Помилка при клонуванні курсу', [
+            'course_id' => $id,
+            'message' => $e->getMessage(),
+            'user_id' => auth()->id()
+        ]);
+        
+        return response()->json([
+            'success' => false,
+            'message' => 'Помилка при клонуванні курсу: ' . $e->getMessage()
+        ], 500);
     }
+}
 
-    /**
-     * Add lesson type specific data.
-     */
-    private function addLessonTypeData(array &$lessonData, $lesson): void
-    {
-        switch ($lesson->type) {
-            case 'lecture':
-                if ($lesson->lecture) {
-                    $lessonData['lecture'] = [
-                        'id' => $lesson->lecture->id,
-                        'content' => $lesson->lecture->content,
-                        'duration_minutes' => $lesson->lecture->duration_minutes
-                    ];
-                }
-                break;
-            
-            case 'test':
-                if ($lesson->test) {
-                    $lessonData['test'] = [
-                        'id' => $lesson->test->id,
-                        'source_type' => $lesson->test->source_type,
-                        'external_url' => $lesson->test->external_url,
-                        'time_limit_minutes' => $lesson->test->time_limit_minutes,
-                        'passing_score' => $lesson->test->passing_score
-                    ];
-                }
-                break;
-            
-            case 'extra_material':
-                if ($lesson->extraMaterial) {
-                    $lessonData['extra_material'] = [
-                        'id' => $lesson->extraMaterial->id,
-                        'material_type' => $lesson->extraMaterial->material_type,
-                        'content' => $lesson->extraMaterial->content,
-                        'file_path' => $lesson->extraMaterial->file_path ? 
-                            Storage::url($lesson->extraMaterial->file_path) : null,
-                        'url' => $lesson->extraMaterial->url
-                    ];
-                }
-                break;
+/**
+ * Отримати курси за кількома категоріями
+ */
+public function getByCategories(Request $request): JsonResponse|AnonymousResourceCollection
+{
+    try {
+        $request->validate([
+            'category_ids' => 'required|array|min:1',
+            'category_ids.*' => 'integer|exists:categories,id',
+            'per_page' => 'nullable|integer|min:1|max:100',
+            'published_only' => 'nullable|boolean'
+        ]);
+        
+        $categoryIds = $request->input('category_ids');
+        $perPage = min($request->input('per_page', 15), 100);
+        $publishedOnly = $request->boolean('published_only', true);
+        
+        $query = \App\Models\Course::whereIn('category_id', $categoryIds);
+        
+        if ($publishedOnly) {
+            $query->published();
         }
+        
+        $courses = $query->with(['category', 'instructor', 'level'])
+                        ->paginate($perPage);
+        
+        return CourseResource::collection($courses);
+        
+    } catch (Exception $e) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Помилка при отриманні курсів за категоріями: ' . $e->getMessage()
+        ], 500);
     }
+}
+
+/**
+ * Отримати курси в межах цінового діапазону
+ */
+public function getByPriceRange(Request $request): JsonResponse|AnonymousResourceCollection
+{
+    try {
+        $request->validate([
+            'min_price' => 'nullable|numeric|min:0',
+            'max_price' => 'nullable|numeric|min:0',
+            'include_free' => 'nullable|boolean',
+            'per_page' => 'nullable|integer|min:1|max:100'
+        ]);
+        
+        $minPrice = $request->input('min_price');
+        $maxPrice = $request->input('max_price');
+        $includeFree = $request->boolean('include_free', true);
+        $perPage = min($request->input('per_page', 15), 100);
+        
+        $query = \App\Models\Course::published();
+        
+        if ($minPrice !== null || $maxPrice !== null) {
+            $query->where(function($q) use ($minPrice, $maxPrice, $includeFree) {
+                if ($includeFree) {
+                    $q->where('price', '=', 0);
+                }
+                
+                if ($minPrice !== null && $maxPrice !== null) {
+                    $q->orWhereBetween('price', [$minPrice, $maxPrice]);
+                } elseif ($minPrice !== null) {
+                    $q->orWhere('price', '>=', $minPrice);
+                } elseif ($maxPrice !== null) {
+                    $q->orWhere('price', '<=', $maxPrice);
+                }
+            });
+        }
+        
+        $courses = $query->with(['category', 'instructor', 'level'])
+                        ->paginate($perPage);
+        
+        return CourseResource::collection($courses);
+        
+    } catch (Exception $e) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Помилка при отриманні курсів за ціновим діапазоном: ' . $e->getMessage()
+        ], 500);
+    }
+}
+
+/**
+ * Отримати безкоштовні курси
+ */
+public function getFreeCourses(Request $request): AnonymousResourceCollection
+{
+    try {
+        $perPage = min($request->input('per_page', 15), 100);
+        
+        $courses = \App\Models\Course::published()
+                    ->where('price', 0)
+                    ->with(['category', 'instructor', 'level'])
+                    ->paginate($perPage);
+        
+        return CourseResource::collection($courses);
+        
+    } catch (Exception $e) {
+        Log::error('Помилка при отриманні безкоштовних курсів', [
+            'message' => $e->getMessage()
+        ]);
+        
+        return CourseResource::collection(collect([]));
+    }
+}
+
+/**
+ * Отримати новітні курси
+ */
+public function getLatestCourses(Request $request): AnonymousResourceCollection
+{
+    try {
+        $limit = min($request->input('limit', 10), 50);
+        
+        $courses = \App\Models\Course::published()
+                    ->orderBy('created_at', 'desc')
+                    ->with(['category', 'instructor', 'level'])
+                    ->limit($limit)
+                    ->get();
+        
+        return CourseResource::collection($courses);
+        
+    } catch (Exception $e) {
+        Log::error('Помилка при отриманні новітніх курсів', [
+            'message' => $e->getMessage()
+        ]);
+        
+        return CourseResource::collection(collect([]));
+    }
+}
+
+/**
+ * Перевірити доступ користувача до курсу
+ */
+public function checkUserAccess(int $id): JsonResponse
+{
+    try {
+        $course = $this->courseService->getCourseById($id);
+        $userId = auth()->id();
+        
+        $hasAccess = $course->hasUserAccess($userId);
+        
+        $accessDetails = [
+            'has_access' => $hasAccess,
+            'is_instructor' => $course->instructor_id === $userId,
+            'is_enrolled' => false,
+            'enrollment_expires_at' => null
+        ];
+        
+        if ($userId) {
+            $enrollment = $course->enrollments()
+                ->where('user_id', $userId)
+                ->where('is_active', true)
+                ->first();
+                
+            if ($enrollment) {
+                $accessDetails['is_enrolled'] = true;
+                $accessDetails['enrollment_expires_at'] = $enrollment->expires_at;
+            }
+        }
+        
+        return response()->json([
+            'success' => true,
+            'access' => $accessDetails
+        ]);
+        
+    } catch (Exception $e) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Помилка при перевірці доступу до курсу: ' . $e->getMessage()
+        ], 500);
+    }
+}
+
+/**
+ * Оновити обкладинку курсу
+ */
+public function updateCover(Request $request, int $id): JsonResponse
+{
+    try {
+        $request->validate([
+            'cover_image' => 'required|image|mimes:jpeg,png,jpg,gif|max:2048', // 2MB
+        ]);
+
+        $course = $this->courseService->getCourseById($id);
+        
+        // Перевірка прав доступу
+        if (!$this->courseService->canUserManageCourse(auth()->id(), $id)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'У вас немає прав для редагування цього курсу'
+            ], 403);
+        }
+
+        // Видаляємо стару обкладинку, якщо вона існує
+        if ($course->cover_image) {
+            $this->courseService->deleteCoverImage($course->cover_image);
+        }
+
+        // Завантажуємо нову обкладинку
+        $coverImage = $request->file('cover_image');
+        $path = $this->courseService->uploadCoverImage($coverImage);
+
+        // Оновлюємо курс
+        $course->update(['cover_image' => $path]);
+
+        Log::info('Обкладинку курсу оновлено', [
+            'course_id' => $id,
+            'new_path' => $path
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Обкладинку курсу успішно оновлено',
+            'cover_image_url' => Storage::disk('public')->url($path)
+        ]);
+
+    } catch (Exception $e) {
+        Log::error('Помилка при оновленні обкладинки курсу', [
+            'course_id' => $id,
+            'error' => $e->getMessage()
+        ]);
+
+        return response()->json([
+            'success' => false,
+            'message' => 'Помилка при оновленні обкладинки курсу: ' . $e->getMessage()
+        ], 500);
+    }
+}
 }

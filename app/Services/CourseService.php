@@ -274,7 +274,7 @@ class CourseService
      * @param UploadedFile $image
      * @return string
      */
-    protected function uploadCoverImage(UploadedFile $image): string
+    public function uploadCoverImage(UploadedFile $image): string
     {
         // Перевірка валідності файлу
         if (!$image->isValid()) {
@@ -308,9 +308,25 @@ class CourseService
      * @param string $path
      * @return bool
      */
-    protected function deleteCoverImage(string $path): bool
+    public function deleteCoverImage(string $path): bool
     {
-        return Storage::disk('public')->delete($path);
+        try {
+            if (Storage::disk('public')->exists($path)) {
+                $deleted = Storage::disk('public')->delete($path);
+                Log::info('Стара обкладинка видалена', [
+                    'path' => $path,
+                    'success' => $deleted
+                ]);
+                return $deleted;
+            }
+            return true; // Файл вже не існує
+        } catch (Exception $e) {
+            Log::error('Помилка при видаленні обкладинки', [
+                'path' => $path,
+                'error' => $e->getMessage()
+            ]);
+            return false;
+        }
     }
 
     public function getCoursesByInstructorId(int $instructorId): Collection
