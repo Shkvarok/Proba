@@ -525,7 +525,7 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::get('/', [LessonController::class, 'index']);
             Route::get('/module/{moduleId}', [LessonController::class, 'index']);
             Route::post('/', [LessonController::class, 'store']);
-            Route::put('/{id}', [LessonController::class, 'update']);
+            Route::post('/{id}', [LessonController::class, 'update']);
             Route::put('/{id}/position', [LessonController::class, 'updatePosition']);
             Route::post('/positions', [LessonController::class, 'updatePositions']);
             Route::delete('/{id}', [LessonController::class, 'destroy']);

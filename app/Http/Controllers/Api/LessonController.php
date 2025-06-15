@@ -180,119 +180,127 @@ class LessonController extends Controller
         ], 404);
     }
 
-public function update(Request $request, $id)
-{
-    try {
-        // Знаходимо урок
-        $lesson = Lesson::with(['lecture', 'test', 'extraMaterial'])->findOrFail($id);
-        
-        // Валідація
-        $validator = Validator::make($request->all(), [
-            'title' => 'nullable|string|max:255',
-            'description' => 'nullable|string',
-            'position' => 'nullable|integer|min:0',
-            'status' => 'nullable|in:active,disabled',
-            'duration_minutes' => 'nullable|integer|min:1',
-            'content_type' => 'nullable|in:text,file',
-            'file' => 'nullable|file|max:10240',
-        ]);
-        
-        if ($validator->fails()) {
-            return response()->json([
-                'message' => 'Помилка валідації даних',
-                'errors' => $validator->errors()
-            ], 422);
-        }
-        
-        // Базові поля уроку
-        if ($request->has('title')) {
-            $lesson->title = $request->title;
-        }
-        
-        if ($request->has('description')) {
-            $lesson->description = $request->description;
-        }
-        
-        if ($request->has('position')) {
-            $lesson->position = (int)$request->position;
-        }
-        
-        if ($request->has('status')) {
-            $lesson->status = $request->status;
-        }
-        
-        // Зберігаємо урок
-        $lesson->save();
-        
-        // Якщо це лекція, оновлюємо специфічні поля
-        if ($lesson->type === 'lecture') {
-            // Отримуємо або створюємо запис лекції
-            $lecture = $lesson->lecture;
-            if (!$lecture) {
-                $lecture = new \App\Models\LessonLecture();
-                $lecture->lesson_id = $lesson->id;
+    public function update(Request $request, $id)
+    {
+        try {
+            // Знаходимо урок
+            $lesson = Lesson::with(['lecture', 'test', 'extraMaterial'])->findOrFail($id);
+            
+            // Валідація
+            $validator = Validator::make($request->all(), [
+                'title' => 'nullable|string|max:255',
+                'description' => 'nullable|string',
+                'position' => 'nullable|integer|min:0',
+                'status' => 'nullable|in:active,disabled',
+                'duration_minutes' => 'nullable|integer|min:1',
+                'content_type' => 'nullable|in:text,file',
+                'file' => 'nullable|file|max:102400', // Збільшено ліміт до 100MB
+            ]);
+            
+            if ($validator->fails()) {
+                return response()->json([
+                    'message' => 'Помилка валідації даних',
+                    'errors' => $validator->errors()
+                ], 422);
             }
             
-            // Тривалість лекції
-            if ($request->has('duration_minutes')) {
-                $lecture->duration_minutes = (int)$request->duration_minutes;
+            // Базові поля уроку
+            if ($request->has('title')) {
+                $lesson->title = $request->title;
             }
             
-            // Обробка файлу
-            if ($request->hasFile('file') && $request->content_type === 'file') {
-                $file = $request->file('file');
-                $fileName = time() . '_' . $file->getClientOriginalName();
-                $filePath = $file->storeAs('lessons/lectures', $fileName, 'public');
+            if ($request->has('description')) {
+                $lesson->description = $request->description;
+            }
+            
+            if ($request->has('position')) {
+                $lesson->position = (int)$request->position;
+            }
+            
+            if ($request->has('status')) {
+                $lesson->status = $request->status;
+            }
+            
+            // Зберігаємо урок
+            $lesson->save();
+            
+            // Якщо це лекція, оновлюємо специфічні поля
+            if ($lesson->type === 'lecture') {
+                // Отримуємо або створюємо запис лекції
+                $lecture = $lesson->lecture;
+                if (!$lecture) {
+                    $lecture = new \App\Models\LessonLecture();
+                    $lecture->lesson_id = $lesson->id;
+                }
                 
-                $lecture->content_type = 'file';
-                $lecture->file_path = $filePath;
-                $lecture->file_type = $file->getClientMimeType();
-                $lecture->file_name = $file->getClientOriginalName();
-                $lecture->content = null; // Очищаємо текстовий контент
-            } 
-            // Обробка текстового контенту
-            elseif ($request->has('content') && $request->content_type === 'text') {
-                $lecture->content_type = 'text';
-                $lecture->content = $request->content;
-                $lecture->file_path = null;
-                $lecture->file_type = null;
-                $lecture->file_name = null;
-            }
-            // Встановлення типу контенту без зміни самого контенту
-            elseif ($request->has('content_type')) {
-                $lecture->content_type = $request->content_type;
+                // Тривалість лекції
+                if ($request->has('duration_minutes')) {
+                    $lecture->duration_minutes = (int)$request->duration_minutes;
+                }
+                
+                // Обробка файлу
+                if ($request->hasFile('file') && $request->content_type === 'file') {
+                    // Видаляємо старий файл, якщо він існує
+                    if ($lecture->file_path) {
+                        Storage::disk('public')->delete($lecture->file_path);
+                    }
+                    
+                    $file = $request->file('file');
+                    $fileName = time() . '_' . $file->getClientOriginalName();
+                    $filePath = $file->storeAs('lessons/lectures', $fileName, 'public');
+                    
+                    $lecture->content_type = 'file';
+                    $lecture->file_path = $filePath;
+                    $lecture->file_type = $file->getClientMimeType();
+                    $lecture->file_name = $file->getClientOriginalName();
+                    $lecture->content = null; // Очищаємо текстовий контент
+                } 
+                // Обробка текстового контенту
+                elseif ($request->has('content') && $request->content_type === 'text') {
+                    // Видаляємо старий файл, якщо він існує
+                    if ($lecture->file_path) {
+                        Storage::disk('public')->delete($lecture->file_path);
+                    }
+                    
+                    $lecture->content_type = 'text';
+                    $lecture->content = $request->content;
+                    $lecture->file_path = null;
+                    $lecture->file_type = null;
+                    $lecture->file_name = null;
+                }
+                // Встановлення типу контенту без зміни самого контенту
+                elseif ($request->has('content_type')) {
+                    $lecture->content_type = $request->content_type;
+                }
+                
+                // Зберігаємо лекцію
+                $lecture->save();
             }
             
-            // Зберігаємо лекцію
-            $lecture->save();
+            // Оновлюємо дані з бази
+            $lesson = $lesson->fresh(['lecture', 'test', 'extraMaterial']);
+            
+            return response()->json([
+                'success' => true,
+                'message' => 'Урок успішно оновлено',
+                'lesson' => $lesson
+            ]);
+            
+        } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::error('Помилка оновлення уроку: ' . $e->getMessage(), [
+                'request' => $request->all(),
+                'id' => $id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Помилка при оновленні уроку',
+                'error' => $e->getMessage()
+            ], 500);
         }
-        
-        // Інші типи уроків можна додати аналогічно
-        
-        // Оновлюємо дані з бази
-        $lesson = $lesson->fresh(['lecture', 'test', 'extraMaterial']);
-        
-        return response()->json([
-            'success' => true,
-            'message' => 'Урок успішно оновлено',
-            'lesson' => $lesson
-        ]);
-        
-    } catch (\Exception $e) {
-        \Illuminate\Support\Facades\Log::error('Помилка оновлення уроку: ' . $e->getMessage(), [
-            'request' => $request->all(),
-            'id' => $id,
-            'error' => $e->getMessage(),
-            'trace' => $e->getTraceAsString()
-        ]);
-        
-        return response()->json([
-            'success' => false,
-            'message' => 'Помилка при оновленні уроку',
-            'error' => $e->getMessage()
-        ], 500);
     }
-}
     
     public function destroy($id)
     {
