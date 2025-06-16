@@ -459,9 +459,10 @@ class PaymentController extends Controller
                 $enrollment = CourseEnrollment::create([
                     'user_id' => $payment->user_id,
                     'course_id' => $payment->entity_id,
-                    'enrollment_type' => 'purchase',
-                    'payment_id' => $payment->id,
                     'is_active' => true,
+                    'payment_id' => $payment->id,
+                    'enrollment_type' => 'purchase',
+                    'enrolled_at' => now(),
                 ]);
                 
                 Log::info('New enrollment created', [
@@ -502,6 +503,295 @@ class PaymentController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Помилка при обробці тестового callback: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Перегляд усіх оплат з фільтрами (адмін)
+     * GET /api/payments/all
+     */
+    public function getPayments(Request $request)
+    {
+        $query = Payment::with(['user', 'entity']);
+
+        // Фільтри
+        if ($request->filled('user_id')) {
+            $query->where('user_id', $request->user_id);
+        }
+        if ($request->filled('course_id')) {
+            $query->where('entity_type', 'course')->where('entity_id', $request->course_id);
+        }
+        if ($request->filled('status')) {
+            $query->where('payment_status', $request->status);
+        }
+        if ($request->filled('date_from')) {
+            $query->whereDate('created_at', '>=', $request->date_from);
+        }
+        if ($request->filled('date_to')) {
+            $query->whereDate('created_at', '<=', $request->date_to);
+        }
+
+        $payments = $query->orderByDesc('created_at')->paginate(30);
+
+        return response()->json($payments);
+    }
+
+    /**
+     * Генерація фінансового звіту (адмін)
+     * GET /api/payments/financial-report
+     */
+    public function getFinancialReport(Request $request)
+    {
+        $query = Payment::query()->where('payment_status', 'completed');
+
+        // Фільтри
+        if ($request->filled('user_id')) {
+            $query->where('user_id', $request->user_id);
+        }
+        if ($request->filled('course_id')) {
+            $query->where('entity_type', 'course')->where('entity_id', $request->course_id);
+        }
+        if ($request->filled('date_from')) {
+            $query->whereDate('created_at', '>=', $request->date_from);
+        }
+        if ($request->filled('date_to')) {
+            $query->whereDate('created_at', '<=', $request->date_to);
+        }
+
+        $totalAmount = $query->sum('amount');
+        $totalCount = $query->count();
+        $byCourse = $query->select('entity_id', DB::raw('SUM(amount) as total'), DB::raw('COUNT(*) as count'))
+            ->groupBy('entity_id')
+            ->get();
+
+        return response()->json([
+            'total_amount' => $totalAmount,
+            'total_count' => $totalCount,
+            'by_course' => $byCourse,
+        ]);
+    }
+
+    /**
+     * Загальний звіт по продажах та по викладачах
+     * GET /api/payments/sales-report
+     */
+    public function getSalesReport(Request $request)
+    {
+        $dateFrom = $request->input('date_from');
+        $dateTo = $request->input('date_to');
+
+        $payments = Payment::query()
+            ->where('payment_status', 'completed')
+            ->where('entity_type', 'course');
+
+        if ($dateFrom) {
+            $payments->whereDate('created_at', '>=', $dateFrom);
+        }
+        if ($dateTo) {
+            $payments->whereDate('created_at', '<=', $dateTo);
+        }
+
+        // Загальна сума та кількість продажів
+        $totalAmount = $payments->sum('amount');
+        $totalCount = $payments->count();
+
+        // Сума і кількість по викладачах
+        $byInstructor = Payment::query()
+            ->select('courses.instructor_id', \DB::raw('SUM(payments.amount) as total'), \DB::raw('COUNT(payments.id) as count'))
+            ->join('courses', 'payments.entity_id', '=', 'courses.id')
+            ->where('payments.payment_status', 'completed')
+            ->where('payments.entity_type', 'course');
+        if ($dateFrom) {
+            $byInstructor->whereDate('payments.created_at', '>=', $dateFrom);
+        }
+        if ($dateTo) {
+            $byInstructor->whereDate('payments.created_at', '<=', $dateTo);
+        }
+        $byInstructor = $byInstructor->groupBy('courses.instructor_id')->get();
+
+        return response()->json([
+            'total_amount' => $totalAmount,
+            'total_count' => $totalCount,
+            'by_instructor' => $byInstructor,
+        ]);
+    }
+
+    /**
+     * Звіт по курсах (кількість і сума продажів по кожному курсу)
+     * GET /api/payments/course-sales
+     */
+    public function getCourseSales(Request $request)
+    {
+        $dateFrom = $request->input('date_from');
+        $dateTo = $request->input('date_to');
+        $instructorId = $request->input('instructor_id');
+
+        $query = Payment::query()
+            ->select('courses.id as course_id', 'courses.title', 'courses.instructor_id', \DB::raw('SUM(payments.amount) as total'), \DB::raw('COUNT(payments.id) as count'))
+            ->join('courses', 'payments.entity_id', '=', 'courses.id')
+            ->where('payments.payment_status', 'completed')
+            ->where('payments.entity_type', 'course');
+
+        if ($dateFrom) {
+            $query->whereDate('payments.created_at', '>=', $dateFrom);
+        }
+        if ($dateTo) {
+            $query->whereDate('payments.created_at', '<=', $dateTo);
+        }
+        if ($instructorId) {
+            $query->where('courses.instructor_id', $instructorId);
+        }
+
+        $byCourse = $query->groupBy('courses.id', 'courses.title', 'courses.instructor_id')->get();
+
+        return response()->json([
+            'by_course' => $byCourse
+        ]);
+    }
+
+    /**
+     * Підтвердження оплати вручну (API)
+     */
+    public function confirmPayment(Request $request, $paymentId)
+    {
+        try {
+            Log::info('Starting payment confirmation', ['payment_id' => $paymentId]);
+            
+            $user = Auth::user();
+            Log::info('User authenticated', ['user_id' => $user->id]);
+            
+            $payment = Payment::findOrFail($paymentId);
+            Log::info('Payment found', [
+                'payment_id' => $payment->id,
+                'current_status' => $payment->payment_status,
+                'user_id' => $payment->user_id
+            ]);
+
+            // Перевірка, чи належить платіж поточному користувачу
+            if ($payment->user_id !== $user->id) {
+                Log::warning('Access denied for payment confirmation', [
+                    'payment_id' => $paymentId,
+                    'payment_user_id' => $payment->user_id,
+                    'current_user_id' => $user->id
+                ]);
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Доступ заборонено'
+                ], 403);
+            }
+
+            // Якщо вже підтверджено
+            if ($payment->payment_status === 'completed') {
+                Log::info('Payment already completed', ['payment_id' => $paymentId]);
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Платіж вже підтверджено',
+                    'payment' => $payment
+                ]);
+            }
+
+            // Дозволяємо підтвердження лише для очікуючих/успішних платежів
+            if (!in_array($payment->payment_status, ['pending', 'success'])) {
+                Log::warning('Invalid payment status for confirmation', [
+                    'payment_id' => $paymentId,
+                    'current_status' => $payment->payment_status
+                ]);
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Платіж не може бути підтверджений у поточному статусі',
+                    'payment' => $payment
+                ], 400);
+            }
+
+            Log::info('Starting transaction for payment confirmation', ['payment_id' => $paymentId]);
+            DB::beginTransaction();
+            
+            try {
+                $payment->payment_status = 'completed';
+                $payment->save();
+                Log::info('Payment status updated', [
+                    'payment_id' => $paymentId,
+                    'new_status' => 'completed'
+                ]);
+
+                // Активуємо підписку, якщо ще не активна
+                $enrollment = CourseEnrollment::where('user_id', $user->id)
+                    ->where('course_id', $payment->entity_id)
+                    ->first();
+                    
+                Log::info('Checking enrollment', [
+                    'payment_id' => $paymentId,
+                    'course_id' => $payment->entity_id,
+                    'enrollment_exists' => $enrollment ? true : false
+                ]);
+
+                if (!$enrollment) {
+                    Log::info('Creating new enrollment', [
+                        'payment_id' => $paymentId,
+                        'course_id' => $payment->entity_id
+                    ]);
+                    $enrollment = CourseEnrollment::create([
+                        'user_id' => $user->id,
+                        'course_id' => $payment->entity_id,
+                        'is_active' => true,
+                        'payment_id' => $payment->id,
+                        'enrollment_type' => 'purchase',
+                        'enrolled_at' => now(),
+                    ]);
+                } elseif (!$enrollment->is_active) {
+                    Log::info('Activating existing enrollment', [
+                        'enrollment_id' => $enrollment->id,
+                        'payment_id' => $paymentId
+                    ]);
+                    $enrollment->is_active = true;
+                    $enrollment->payment_id = $payment->id;
+                    $enrollment->save();
+                }
+
+                DB::commit();
+                Log::info('Payment confirmation completed successfully', [
+                    'payment_id' => $paymentId,
+                    'enrollment_id' => $enrollment->id
+                ]);
+
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Платіж підтверджено, доступ до курсу надано',
+                    'payment' => $payment,
+                    'enrollment' => $enrollment
+                ]);
+                
+            } catch (\Exception $e) {
+                DB::rollBack();
+                Log::error('Error during payment confirmation transaction', [
+                    'payment_id' => $paymentId,
+                    'error' => $e->getMessage(),
+                    'trace' => $e->getTraceAsString()
+                ]);
+                throw $e;
+            }
+            
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            Log::error('Payment not found', [
+                'payment_id' => $paymentId,
+                'error' => $e->getMessage()
+            ]);
+            return response()->json([
+                'success' => false,
+                'message' => 'Платіж не знайдено'
+            ], 404);
+            
+        } catch (\Exception $e) {
+            Log::error('Payment confirmation error', [
+                'payment_id' => $paymentId,
+                'user_id' => Auth::id(),
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            return response()->json([
+                'success' => false,
+                'message' => 'Помилка при підтвердженні платежу: ' . $e->getMessage()
             ], 500);
         }
     }

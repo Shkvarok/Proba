@@ -21,6 +21,7 @@ class DatabaseSeeder extends Seeder
             ModuleSeeder::class,
             LessonSeeder::class,
             InternalTestSeeder::class,
+            PaymentSeeder::class,
         ]);
     }
 }

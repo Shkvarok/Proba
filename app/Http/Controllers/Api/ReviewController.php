@@ -46,23 +46,10 @@ class ReviewController extends Controller
         $user = Auth::user();
         $course = Course::findOrFail($courseId);
         
-        // Перевіряємо, чи має користувач доступ до курсу
-        $enrollment = CourseEnrollment::where('user_id', $user->id)
-            ->where('course_id', $course->id)
-            ->where('is_active', true)
-            ->first();
-            
-        if (!$enrollment) {
-            return response()->json([
-                'message' => 'Ви не маєте доступу до цього курсу'
-            ], 403);
-        }
-        
         // Перевіряємо, чи вже існує відгук від цього користувача для цього курсу
         $existingReview = Review::where('user_id', $user->id)
             ->where('course_id', $course->id)
             ->first();
-            
         if ($existingReview) {
             return response()->json([
                 'message' => 'Ви вже залишили відгук для цього курсу',
@@ -70,12 +57,19 @@ class ReviewController extends Controller
             ], 422);
         }
         
-        // Валідація даних
-        $validator = Validator::make($request->all(), [
-            'content' => 'required|string|min:3|max:1000',
-            'rating' => 'required|integer|min:1|max:5',
-        ]);
+        // Чи має користувач доступ до курсу (підписка, інструктор, адмін)
+        $hasAccess = $course->hasUserAccess($user->id);
         
+        // Валідація
+        $rules = [
+            'content' => 'required|string|min:3|max:1000',
+        ];
+        if ($hasAccess) {
+            $rules['rating'] = 'required|integer|min:1|max:5';
+        } else {
+            $rules['rating'] = 'nullable';
+        }
+        $validator = Validator::make($request->all(), $rules);
         if ($validator->fails()) {
             return response()->json([
                 'message' => 'Помилка валідації',
@@ -91,7 +85,7 @@ class ReviewController extends Controller
             'user_id' => $user->id,
             'course_id' => $course->id,
             'content' => $request->content,
-            'rating' => $request->rating,
+            'rating' => $hasAccess ? $request->rating : null,
             'is_approved' => $isAutoApproved,
         ]);
         

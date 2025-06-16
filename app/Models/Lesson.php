@@ -85,4 +85,170 @@ class Lesson extends Model
                $this->test && 
                $this->test->source_type === 'external';
     }
+
+
+    /**
+     * Прогрес уроку для різних користувачів
+     */
+    public function progress(): HasMany
+    {
+        return $this->hasMany(LessonProgress::class);
+    }
+
+    /**
+     * Отримати прогрес уроку для конкретного користувача
+     */
+    public function getProgressForUser(int $userId): ?LessonProgress
+    {
+        return $this->progress()->where('user_id', $userId)->first();
+    }
+
+    /**
+     * Перевірити чи урок завершений користувачем
+     */
+    public function isCompletedByUser(int $userId): bool
+    {
+        $progress = $this->getProgressForUser($userId);
+        return $progress ? $progress->is_completed : false;
+    }
+
+    /**
+     * Перевірити чи урок розпочатий користувачем
+     */
+    public function isStartedByUser(int $userId): bool
+    {
+        $progress = $this->getProgressForUser($userId);
+        return $progress ? !is_null($progress->started_at) : false;
+    }
+
+    /**
+     * Отримати відсоток прогресу уроку для користувача
+     */
+    public function getProgressPercentageForUser(int $userId): float
+    {
+        $progress = $this->getProgressForUser($userId);
+        return $progress ? $progress->progress_percentage : 0;
+    }
+
+    /**
+     * Позначити урок як розпочатий для користувача
+     */
+    public function markAsStartedForUser(int $userId): LessonProgress
+    {
+        $progress = LessonProgress::firstOrCreate(
+            [
+                'user_id' => $userId,
+                'lesson_id' => $this->id,
+            ]
+        );
+
+        return $progress->markAsStarted();
+    }
+
+    /**
+     * Позначити урок як завершений для користувача
+     */
+    public function markAsCompletedForUser(int $userId): LessonProgress
+    {
+        $progress = LessonProgress::firstOrCreate(
+            [
+                'user_id' => $userId,
+                'lesson_id' => $this->id,
+            ]
+        );
+
+        return $progress->markAsCompleted();
+    }
+
+    /**
+     * Оновити прогрес уроку для користувача
+     */
+    public function updateProgressForUser(int $userId, float $percentage, int $timeSpent = 0): LessonProgress
+    {
+        $progress = LessonProgress::firstOrCreate(
+            [
+                'user_id' => $userId,
+                'lesson_id' => $this->id,
+            ]
+        );
+
+        return $progress->updateProgress($percentage, $timeSpent);
+    }
+
+     /**
+     * Отримати статистику завершення уроку
+     */
+    public function getCompletionStats(): array
+    {
+        $totalProgress = $this->progress()->count();
+        $completedCount = $this->progress()->where('is_completed', true)->count();
+        $averageProgress = $this->progress()->avg('progress_percentage') ?: 0;
+        $averageTimeSpent = $this->progress()->avg('time_spent') ?: 0;
+
+        return [
+            'total_students' => $totalProgress,
+            'completed_count' => $completedCount,
+            'completion_rate' => $totalProgress > 0 ? round($completedCount / $totalProgress * 100, 2) : 0,
+            'average_progress' => round($averageProgress, 2),
+            'average_time_spent' => round($averageTimeSpent),
+        ];
+    }
+
+    /**
+     * Отримати наступний урок в модулі
+     */
+    public function getNextLesson(): ?self
+    {
+        return self::where('module_id', $this->module_id)
+            ->where('position', '>', $this->position)
+            ->orderBy('position')
+            ->first();
+    }
+
+    /**
+     * Отримати попередній урок в модулі
+     */
+    public function getPreviousLesson(): ?self
+    {
+        return self::where('module_id', $this->module_id)
+            ->where('position', '<', $this->position)
+            ->orderBy('position', 'desc')
+            ->first();
+    }
+
+    /**
+     * Перевірити чи урок доступний для користувача
+     */
+    public function isAccessibleByUser(int $userId): bool
+    {
+        // Перевіряємо доступ до курсу
+        $course = $this->module->course;
+        
+        if (!$course->hasUserAccess($userId)) {
+            return false;
+        }
+
+        // Додаткова логіка: можна зробити так, щоб уроки були доступні послідовно
+        // (тільки після завершення попереднього)
+        
+        return true;
+    }
+
+    /**
+     * Отримати рекомендовану тривалість уроку (якщо це лекція)
+     */
+    public function getEstimatedDuration(): ?int
+    {
+        if ($this->type === 'lecture' && $this->lecture) {
+            return $this->lecture->duration_minutes;
+        }
+
+        // Для інших типів уроків можна встановити стандартну тривалість
+        return match($this->type) {
+            'test' => 30, // 30 хвилин для тесту
+            'extra_material' => 15, // 15 хвилин для додаткових матеріалів
+            default => null,
+        };
+    }
+
 }

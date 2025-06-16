@@ -146,4 +146,175 @@ public function reviewComments()
 {
     return $this->hasMany(ReviewComment::class);
 }
+
+public function lessonProgress(): HasMany
+{
+    return $this->hasMany(LessonProgress::class);
+}
+
+/**
+ * Отримати прогрес користувача по конкретному курсу
+ */
+public function getCourseProgress(int $courseId): array
+{
+    $course = Course::findOrFail($courseId);
+    return $course->getUserProgress($this->id);
+}
+
+/**
+ * Отримати прогрес по всіх курсах користувача
+ */
+public function getAllCoursesProgress(): array
+{
+    // Отримуємо всі курси, на які підписаний користувач
+    $enrolledCourses = $this->enrolledCourses()->get();
+    
+    $progressData = [];
+    
+    foreach ($enrolledCourses as $course) {
+        $progressData[] = array_merge(
+            $course->getUserProgress($this->id),
+            [
+                'course_title' => $course->title,
+                'course_cover' => $course->cover_image_url,
+            ]
+        );
+    }
+    
+    return $progressData;
+}
+
+/**
+ * Позначити урок як розпочатий
+ */
+public function startLesson(int $lessonId): LessonProgress
+{
+    $progress = LessonProgress::firstOrCreate(
+        [
+            'user_id' => $this->id,
+            'lesson_id' => $lessonId,
+        ],
+        [
+            'started_at' => now(),
+            'last_accessed_at' => now(),
+        ]
+    );
+
+    if (!$progress->started_at) {
+        $progress->markAsStarted();
+    } else {
+        $progress->last_accessed_at = now();
+        $progress->save();
+    }
+
+    return $progress;
+}
+
+/**
+ * Позначити урок як завершений
+ */
+public function completeLesson(int $lessonId): LessonProgress
+{
+    $progress = LessonProgress::firstOrCreate(
+        [
+            'user_id' => $this->id,
+            'lesson_id' => $lessonId,
+        ]
+    );
+
+    return $progress->markAsCompleted();
+}
+
+/**
+ * Оновити прогрес уроку
+ */
+public function updateLessonProgress(int $lessonId, float $percentage, int $timeSpent = 0): LessonProgress
+{
+    $progress = LessonProgress::firstOrCreate(
+        [
+            'user_id' => $this->id,
+            'lesson_id' => $lessonId,
+        ]
+    );
+
+    return $progress->updateProgress($percentage, $timeSpent);
+}
+
+/**
+ * Отримати останню активність користувача по урокам
+ */
+public function getRecentLessonActivity(int $limit = 10): \Illuminate\Database\Eloquent\Collection
+{
+    return $this->lessonProgress()
+        ->with(['lesson.module.course'])
+        ->whereNotNull('last_accessed_at')
+        ->orderBy('last_accessed_at', 'desc')
+        ->limit($limit)
+        ->get();
+}
+
+/**
+ * Отримати статистику навчання користувача
+ */
+public function getLearningStats(): array
+{
+    $totalCourses = $this->enrolledCourses()->count();
+    $completedCourses = 0;
+    $totalLessons = 0;
+    $completedLessons = 0;
+    $totalTimeSpent = 0;
+
+    foreach ($this->enrolledCourses as $course) {
+        $progress = $course->getUserProgress($this->id);
+        
+        $totalLessons += $progress['total_lessons'];
+        $completedLessons += $progress['completed_lessons'];
+        $totalTimeSpent += $progress['total_time_spent'];
+        
+        if ($progress['is_completed']) {
+            $completedCourses++;
+        }
+    }
+
+    return [
+        'total_courses' => $totalCourses,
+        'completed_courses' => $completedCourses,
+        'course_completion_rate' => $totalCourses > 0 ? round($completedCourses / $totalCourses * 100, 2) : 0,
+        'total_lessons' => $totalLessons,
+        'completed_lessons' => $completedLessons,
+        'lesson_completion_rate' => $totalLessons > 0 ? round($completedLessons / $totalLessons * 100, 2) : 0,
+        'total_time_spent' => $totalTimeSpent,
+        'average_time_per_lesson' => $completedLessons > 0 ? round($totalTimeSpent / $completedLessons) : 0,
+    ];
+}
+
+/**
+ * Перевірити чи користувач завершив конкретний урок
+ */
+public function hasCompletedLesson(int $lessonId): bool
+{
+    return $this->lessonProgress()
+        ->where('lesson_id', $lessonId)
+        ->where('is_completed', true)
+        ->exists();
+}
+
+/**
+ * Перевірити чи користувач завершив конкретний курс
+ */
+public function hasCompletedCourse(int $courseId): bool
+{
+    $course = Course::findOrFail($courseId);
+    return $course->isCompletedByUser($this->id);
+}
+
+/**
+ * Отримати наступний урок для вивчення в курсі
+ */
+public function getNextLessonInCourse(int $courseId): ?Lesson
+{
+    $course = Course::findOrFail($courseId);
+    return $course->getNextLessonForUser($this->id);
+}
+
 }

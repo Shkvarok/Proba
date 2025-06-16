@@ -278,6 +278,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/course/{courseId}', [PaymentController::class, 'createCoursePayment']);        
         Route::post('/course/{courseId}/liqpay', [PaymentController::class, 'initiateCoursePayment']);
         Route::get('/{paymentId}/status', [PaymentController::class, 'checkPaymentStatus']);
+        Route::post('/{paymentId}/confirm', [PaymentController::class, 'confirmPayment']);
         Route::get('/course/{courseId}/success', [PaymentController::class, 'paymentSuccess'])->name('courses.payment.success');
         
         // Тестова відповідь для обробки платежів які оплатили через LiqPay
@@ -431,9 +432,8 @@ Route::middleware('auth:sanctum')->group(function () {
     // ВІДГУКИ КОРИСТУВАЧІВ
     // ========================================
     Route::prefix('reviews')->group(function () {
-        // Додати відгук до курсу (тільки для користувачів, що мають доступ до курсу)
-        Route::post('/course/{courseId}', [ReviewController::class, 'storeReview'])
-            ->middleware(\App\Http\Middleware\CheckCourseReviewAccess::class);
+        // Додати відгук до курсу (тепер для всіх користувачів)
+        Route::post('/course/{courseId}', [ReviewController::class, 'storeReview']);
         
         // Оновити свій відгук
         Route::put('/{reviewId}', [ReviewController::class, 'updateReview']);
@@ -450,15 +450,26 @@ Route::middleware('auth:sanctum')->group(function () {
     // ========================================
     // ТІЛЬКИ ДЛЯ АДМІНІСТРАТОРІВ
     // ========================================
-    Route::middleware([CheckRole::class . ':admin,super_admin'])->group(function () {
+    Route::middleware([\App\Http\Middleware\CheckRole::class . ':admin,super_admin'])->group(function () {
         // Загальна статистика курсів
         Route::get('/admin/courses/statistics', [CourseController::class, 'getStatistics']);
+        Route::prefix('payments')->group(function () {
+            // Перегляд усіх оплат з фільтрами
+            Route::get('/all', [PaymentController::class, 'getPayments']);
+            // Генерація фінансового звіту
+            Route::get('/financial-report', [PaymentController::class, 'getFinancialReport']);
+            // Загальний звіт по продажах та по викладачах
+            Route::get('/sales-report', [PaymentController::class, 'getSalesReport']);
+            // Звіт по курсах
+            Route::get('/course-sales', [PaymentController::class, 'getCourseSales']);
+        });
     });
 
+    
     // ========================================
     // ДЛЯ ВИКЛАДАЧІВ ТА АДМІНІСТРАТОРІВ
     // ========================================
-    Route::middleware([CheckRole::class . ':teacher,admin,super_admin'])->group(function () {
+    Route::middleware([\App\Http\Middleware\CheckRole::class . ':teacher,admin,super_admin'])->group(function () {
         
         // ========================================
         // УПРАВЛІННЯ КУРСАМИ
@@ -571,8 +582,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // ========================================
     // ТІЛЬКИ ДЛЯ АДМІНІСТРАТОРІВ
     // ========================================
-    Route::middleware([CheckRole::class . ':admin,super_admin'])->group(function () {
-        // ========================================
+    Route::middleware(['auth:sanctum', \App\Http\Middleware\CheckRole::class . ':admin,super_admin'])->group(function () {        // ========================================
         // УПРАВЛІННЯ КОРИСТУВАЧАМИ
         // ========================================
         Route::prefix('users')->group(function () {
@@ -707,5 +717,81 @@ Route::middleware('auth:sanctum')->group(function () {
             'fields_present' => array_keys($request->except(['_token', '_method', 'cover_image'])),
             'would_update' => !empty($filteredData) ? 'Yes' : 'No (no data to update)'
         ]);
+    });
+
+    // ========================================
+    // СИСТЕМА ПРОГРЕСУ УРОКІВ
+    // ========================================
+    Route::prefix('lessons')->group(function () {
+        Route::post('/{lessonId}/start', [\App\Http\Controllers\Api\ProgressController::class, 'startLesson'])->where('lessonId', '[0-9]+');
+        Route::post('/{lessonId}/complete', [\App\Http\Controllers\Api\ProgressController::class, 'completeLesson'])->where('lessonId', '[0-9]+');
+        Route::put('/{lessonId}/progress', [\App\Http\Controllers\Api\ProgressController::class, 'updateLessonProgress'])->where('lessonId', '[0-9]+');
+        Route::get('/{lessonId}/progress', [\App\Http\Controllers\Api\ProgressController::class, 'getLessonProgress'])->where('lessonId', '[0-9]+');
+        Route::delete('/{lessonId}/progress', [\App\Http\Controllers\Api\ProgressController::class, 'resetLessonProgress'])->where('lessonId', '[0-9]+');
+        Route::get('/{lessonId}/access', [\App\Http\Controllers\Api\ProgressController::class, 'checkLessonAccess'])->where('lessonId', '[0-9]+');
+    });
+    Route::prefix('courses')->group(function () {
+        Route::get('/{courseId}/progress', [\App\Http\Controllers\Api\ProgressController::class, 'getCourseProgress'])->where('courseId', '[0-9]+');
+        Route::get('/{courseId}/detailed-progress', [\App\Http\Controllers\Api\ProgressController::class, 'getDetailedCourseProgress'])->where('courseId', '[0-9]+');
+        Route::delete('/{courseId}/progress', [\App\Http\Controllers\Api\ProgressController::class, 'resetCourseProgress'])->where('courseId', '[0-9]+');
+        Route::get('/{courseId}/next-lesson', [\App\Http\Controllers\Api\ProgressController::class, 'getNextLesson'])->where('courseId', '[0-9]+');
+        Route::get('/{courseId}/top-students', [\App\Http\Controllers\Api\ProgressController::class, 'getCourseTopStudents'])->where('courseId', '[0-9]+')->middleware([\App\Http\Middleware\CheckRole::class . ':teacher,admin,super_admin']);
+    });
+    Route::prefix('users')->group(function () {
+        Route::get('/my-progress', [\App\Http\Controllers\Api\ProgressController::class, 'getMyProgress']);
+        Route::get('/learning-stats', [\App\Http\Controllers\Api\ProgressController::class, 'getLearningStats']);
+        Route::get('/recent-activity', [\App\Http\Controllers\Api\ProgressController::class, 'getRecentActivity']);
+    });
+
+    // Додаємо маршрут для статистики завершення курсу
+    Route::prefix('courses/manage')->group(function () {
+        Route::get('/{id}/completion-stats', [\App\Http\Controllers\Api\CourseController::class, 'getCompletionStats'])->where('id', '[0-9]+');
+    });
+
+    // Тестові маршрути для прогресу
+    Route::post('/test/create-sample-progress/{courseId}', function($courseId) {
+        $course = \App\Models\Course::findOrFail($courseId);
+        $userId = auth()->id();
+        $lessons = $course->lessons()->limit(5)->get();
+        $created = [];
+        foreach ($lessons as $lesson) {
+            $progress = \App\Models\LessonProgress::firstOrCreate(
+                [ 'user_id' => $userId, 'lesson_id' => $lesson->id ],
+                [
+                    'progress_percentage' => rand(10, 100),
+                    'time_spent' => rand(300, 3600),
+                    'started_at' => now()->subHours(rand(1, 48)),
+                    'last_accessed_at' => now()->subHours(rand(0, 24)),
+                ]
+            );
+            if ($progress->progress_percentage >= 100) {
+                $progress->is_completed = true;
+                $progress->completed_at = now()->subHours(rand(0, 24));
+                $progress->save();
+            }
+            $created[] = $progress;
+        }
+        return response()->json([
+            'success' => true,
+            'message' => 'Тестовий прогрес створено',
+            'created_count' => count($created)
+        ]);
+    });
+    Route::delete('/test/clear-my-progress', function() {
+        $userId = auth()->id();
+        $deleted = \App\Models\LessonProgress::where('user_id', $userId)->delete();
+        return response()->json([
+            'success' => true,
+            'message' => 'Весь прогрес користувача видалено',
+            'deleted_count' => $deleted
+        ]);
+    });
+
+    // === API для підписок на сповіщення ===
+    Route::prefix('notifications')->group(function () {
+        Route::post('/subscribe', [\App\Http\Controllers\Api\NotificationSubscriptionController::class, 'subscribe']);
+        Route::post('/unsubscribe', [\App\Http\Controllers\Api\NotificationSubscriptionController::class, 'unsubscribe']);
+        Route::middleware('auth:sanctum')->get('/my', [\App\Http\Controllers\Api\NotificationSubscriptionController::class, 'getMySubscriptions']);
+        Route::middleware('auth:sanctum')->put('/{id}', [\App\Http\Controllers\Api\NotificationSubscriptionController::class, 'updateSubscription']);
     });
 });
