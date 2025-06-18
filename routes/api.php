@@ -29,89 +29,7 @@ Route::get('/test', function() {
     return response()->json(['message' => 'testing'], 200);
 });
 
-// ТЕСТОВИЙ МАРШРУТ ДЛЯ STORAGE
-Route::get('/test-storage', function() {
-    try {
-        // Тестуємо створення файлу
-        Storage::disk('public')->put('test-connection.txt', 'Hello World ' . now());
-        $exists = Storage::disk('public')->exists('test-connection.txt');
-        $url = Storage::disk('public')->url('test-connection.txt');
-        $content = Storage::disk('public')->get('test-connection.txt');
-        Storage::disk('public')->delete('test-connection.txt');
-        
-        return response()->json([
-            'success' => true,
-            'storage_path' => storage_path('app/public'),
-            'public_path' => public_path('storage'),
-            'link_exists' => is_link(public_path('storage')),
-            'course_covers_dir_exists' => is_dir(storage_path('app/public/course-covers')),
-            'course_covers_writable' => is_writable(storage_path('app/public/course-covers')),
-            'test_file_created' => $exists,
-            'test_file_content' => $content,
-            'generated_url' => $url,
-            'app_url' => config('app.url'),
-            'filesystem_disk' => config('filesystems.default'),
-            'public_disk_config' => config('filesystems.disks.public'),
-            'permissions' => [
-                'storage_app_public' => substr(sprintf('%o', fileperms(storage_path('app/public'))), -4),
-                'course_covers' => file_exists(storage_path('app/public/course-covers')) ? 
-                    substr(sprintf('%o', fileperms(storage_path('app/public/course-covers'))), -4) : 'not_exists'
-            ]
-        ]);
-    } catch (Exception $e) {
-        return response()->json([
-            'success' => false,
-            'error' => $e->getMessage(),
-            'trace' => $e->getTraceAsString()
-        ], 500);
-    }
-});
 
-// ТЕСТОВИЙ МАРШРУТ ДЛЯ ЗАВАНТАЖЕННЯ ФАЙЛІВ
-Route::post('/test-upload', function(Request $request) {
-    try {
-        if (!$request->hasFile('test_file')) {
-            return response()->json([
-                'success' => false,
-                'error' => 'No file uploaded',
-                'available_files' => $request->allFiles()
-            ], 400);
-        }
-        
-        $file = $request->file('test_file');
-        
-        if (!$file->isValid()) {
-            return response()->json([
-                'success' => false,
-                'error' => 'Invalid file: ' . $file->getErrorMessage()
-            ], 400);
-        }
-        
-        // Тестуємо завантаження
-        $path = $file->store('test-uploads', 'public');
-        
-        return response()->json([
-            'success' => true,
-            'path' => $path,
-            'url' => Storage::disk('public')->url($path),
-            'exists' => Storage::disk('public')->exists($path),
-            'full_path' => Storage::disk('public')->path($path),
-            'file_info' => [
-                'original_name' => $file->getClientOriginalName(),
-                'mime_type' => $file->getMimeType(),
-                'size' => $file->getSize(),
-                'extension' => $file->getClientOriginalExtension()
-            ]
-        ]);
-        
-    } catch (Exception $e) {
-        return response()->json([
-            'success' => false,
-            'error' => $e->getMessage(),
-            'trace' => $e->getTraceAsString()
-        ], 500);
-    }
-});
 
 Route::get('/test-routes', function() {
     $routes = [];
@@ -131,15 +49,35 @@ Route::get('/test-routes', function() {
     ]);
 });
 
-// Утиліти для розробки
+Route::get('/storage-link', function () {
+    try {
+        Artisan::call('storage:link');
+        return response()->json(['message' => 'Storage link created successfully.']);
+    } catch (\Exception $e) {
+        return response()->json(['error' => $e->getMessage()], 500);
+    }
+})->name('storage.link');
+
+Route::get('/run-migrations', function () {
+    Artisan::call('migrate');
+    return response()->json(['message' => 'Migrations have been run successfully.']);
+})->name('run.migrations');
+
 Route::get('/run-seeders', function () {
     Artisan::call('db:seed');
     return response()->json(['message' => 'Seeders have been run successfully.']);
 })->name('run.seeders');
 
 Route::get('/migrate-fresh', function () {
-    Artisan::call('migrate:fresh', ['--force' => true]);
-    return response()->json(['message' => 'Database has been refreshed and migrations have been re-run.']);
+    try {
+        Artisan::call('migrate:fresh', ['--force' => true]);
+        return response()->json(['message' => 'Database has been refreshed and migrations have been re-run.']);
+    } catch (\Exception $e) {
+        return response()->json([
+            'error' => 'Failed to refresh database',
+            'message' => $e->getMessage(),
+        ], 500);
+    }
 })->name('migrate.fresh');
 
 // ========================================

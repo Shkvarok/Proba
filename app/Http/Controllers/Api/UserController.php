@@ -307,7 +307,7 @@ class UserController extends Controller
             ]);
 
             $validator = Validator::make($request->all(), [
-                'role_name' => 'required|string|in:user,teacher,admin,super_admin',
+                'role_name' => 'required|string|in:student,teacher,admin,super_admin',
             ]);
 
             if ($validator->fails()) {
@@ -353,15 +353,15 @@ class UserController extends Controller
                 Log::info('UserController@changeRole: Супер адмін має повні права');
                 
             } elseif ($authUserRole === 'admin') {
-                // Адміністратор може змінити роль тільки на teacher або user
+                // Адміністратор може змінити роль тільки на teacher або student
                 if (in_array($requestedRoleName, ['super_admin', 'admin'])) {
                     Log::warning('UserController@changeRole: Адмін намагається призначити заборонену роль', [
                         'requested_role' => $requestedRoleName
                     ]);
                     
                     return response()->json([
-                        'message' => 'Адміністратор може змінювати роль тільки на "Вчитель" або "Користувач"',
-                        'allowed_roles' => ['teacher', 'user']
+                        'message' => 'Адміністратор може змінювати роль тільки на "Вчитель" або "Студент"',
+                        'allowed_roles' => ['teacher', 'student']
                     ], 403);
                 }
 

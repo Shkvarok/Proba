@@ -11,7 +11,6 @@ return new class extends Migration
         Schema::create('lessons', function (Blueprint $table) {
             $table->unsignedInteger('id')->autoIncrement();
             
-            // Використовуємо той же тип, що і в таблиці modules
             $table->unsignedInteger('module_id');
             $table->foreign('module_id')->references('id')->on('modules')->onDelete('cascade');
             
