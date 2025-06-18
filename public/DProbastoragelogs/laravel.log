@@ -824,3 +824,11 @@
 [2025-06-18 13:54:26] local.INFO: UserController@changeRole: Дані для перевірки {"target_user_id":4,"target_user_current_role":"teacher","auth_user_role":"super_admin","requested_role":"student"} 
 [2025-06-18 13:54:26] local.INFO: UserController@changeRole: Супер адмін має повні права  
 [2025-06-18 13:54:26] local.INFO: UserController@changeRole: Роль успішно змінена {"user_id":4,"old_role":"teacher","new_role":"student","changed_by":1} 
+[2025-06-18 17:46:48] local.INFO: Початок виконання методу indexOnly {"user_id":null,"params":[]} 
+[2025-06-18 17:46:50] local.INFO: Курси отримано успішно (тільки базова інформація) {"count":15} 
+[2025-06-18 17:46:59] local.INFO: Початок виконання методу index (повна версія) {"user_id":null,"params":[]} 
+[2025-06-18 17:47:00] local.INFO: Курси отримано успішно (повна версія) {"count":15} 
+[2025-06-18 17:56:15] local.INFO: Початок виконання методу index (повна версія) {"user_id":null,"params":[]} 
+[2025-06-18 17:56:16] local.INFO: Курси отримано успішно (повна версія) {"count":15} 
+[2025-06-18 17:56:22] local.INFO: Початок виконання методу indexOnly {"user_id":null,"params":[]} 
+[2025-06-18 17:56:23] local.INFO: Курси отримано успішно (тільки базова інформація) {"count":15} 

@@ -46,8 +46,8 @@ class CourseResource extends JsonResource
         $data['reviews_count'] = $this->getReviewsCount();
         $data['average_rating'] = $this->getAverageRating();
 
-        // Додаємо відносини якщо завантажені
-        if ($this->relationLoaded('category')) {
+        // Додаємо відносини якщо завантажені та існують
+        if ($this->relationLoaded('category') && $this->category) {
             $data['category'] = [
                 'id' => $this->category->id,
                 'name' => $this->category->name,
@@ -55,7 +55,7 @@ class CourseResource extends JsonResource
             ];
         }
 
-        if ($this->relationLoaded('instructor')) {
+        if ($this->relationLoaded('instructor') && $this->instructor) {
             $data['instructor'] = [
                 'id' => $this->instructor->id,
                 'name' => $this->instructor->name,
@@ -63,7 +63,7 @@ class CourseResource extends JsonResource
             ];
         }
 
-        if ($this->relationLoaded('level')) {
+        if ($this->relationLoaded('level') && $this->level) {
             $data['level'] = [
                 'id' => $this->level->id,
                 'name' => $this->level->name
@@ -71,7 +71,7 @@ class CourseResource extends JsonResource
         }
 
         // Додаємо модулі якщо завантажені
-        if ($this->relationLoaded('modules')) {
+        if ($this->relationLoaded('modules') && $this->modules) {
             $data['modules'] = $this->modules->map(function($module) {
                 $moduleData = [
                     'id' => $module->id,
@@ -81,7 +81,7 @@ class CourseResource extends JsonResource
                 ];
 
                 // Додаємо уроки якщо завантажені
-                if ($module->relationLoaded('lessons')) {
+                if ($module->relationLoaded('lessons') && $module->lessons) {
                     $moduleData['lessons'] = $module->lessons->map(function($lesson) {
                         return [
                             'id' => $lesson->id,
@@ -108,7 +108,7 @@ class CourseResource extends JsonResource
     {
         try {
             if ($this->relationLoaded('modules')) {
-                return $this->modules->count();
+                return $this->modules ? $this->modules->count() : 0;
             }
             return $this->modules()->count();
         } catch (\Exception $e) {
@@ -122,11 +122,12 @@ class CourseResource extends JsonResource
     private function getLessonsCount(): int
     {
         try {
-            if ($this->relationLoaded('modules')) {
+            if ($this->relationLoaded('modules') && $this->modules) {
                 return $this->modules->sum(function($module) {
-                    return $module->relationLoaded('lessons') 
-                        ? $module->lessons->count() 
-                        : $module->lessons()->count();
+                    if ($module->relationLoaded('lessons')) {
+                        return $module->lessons ? $module->lessons->count() : 0;
+                    }
+                    return $module->lessons()->count();
                 });
             }
             return \App\Models\Lesson::whereHas('module', function($query) {
@@ -144,7 +145,8 @@ class CourseResource extends JsonResource
     {
         try {
             if ($this->relationLoaded('enrollments')) {
-                return $this->enrollments->where('is_active', true)->count();
+                return $this->enrollments ? 
+                    $this->enrollments->where('is_active', true)->count() : 0;
             }
             return $this->enrollments()->where('is_active', true)->count();
         } catch (\Exception $e) {
@@ -159,7 +161,8 @@ class CourseResource extends JsonResource
     {
         try {
             if ($this->relationLoaded('reviews')) {
-                return $this->reviews->where('status', 'approved')->count();
+                return $this->reviews ? 
+                    $this->reviews->where('status', 'approved')->count() : 0;
             }
             return $this->approvedReviews()->count();
         } catch (\Exception $e) {
@@ -173,7 +176,7 @@ class CourseResource extends JsonResource
     private function getAverageRating(): float
     {
         try {
-            if ($this->relationLoaded('reviews')) {
+            if ($this->relationLoaded('reviews') && $this->reviews) {
                 $approvedReviews = $this->reviews->where('status', 'approved');
                 return $approvedReviews->count() > 0 
                     ? round($approvedReviews->avg('rating'), 1) 
