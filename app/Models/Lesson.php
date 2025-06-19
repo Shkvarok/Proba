@@ -178,21 +178,66 @@ class Lesson extends Model
      /**
      * Отримати статистику завершення уроку
      */
-    public function getCompletionStats(): array
-    {
-        $totalProgress = $this->progress()->count();
-        $completedCount = $this->progress()->where('is_completed', true)->count();
-        $averageProgress = $this->progress()->avg('progress_percentage') ?: 0;
-        $averageTimeSpent = $this->progress()->avg('time_spent') ?: 0;
+/**
+ * Отримати статистику завершення уроку
+ */
+public function getCompletionStats(): array
+{
+    $totalStudents = \DB::table('course_enrollments')
+        ->where('course_id', $this->module->course_id)
+        ->where('is_active', true)
+        ->count();
 
-        return [
-            'total_students' => $totalProgress,
-            'completed_count' => $completedCount,
-            'completion_rate' => $totalProgress > 0 ? round($completedCount / $totalProgress * 100, 2) : 0,
-            'average_progress' => round($averageProgress, 2),
-            'average_time_spent' => round($averageTimeSpent),
-        ];
-    }
+    $completedCount = $this->progress()
+        ->where('is_completed', true)
+        ->count();
+
+    $averageTime = $this->progress()
+        ->where('is_completed', true)
+        ->avg('time_spent');
+
+    return [
+        'total_students' => $totalStudents,
+        'completed_count' => $completedCount,
+        'completion_rate' => $totalStudents > 0 ? round(($completedCount / $totalStudents) * 100, 1) : 0,
+        'average_completion_time' => $averageTime ? round($averageTime) : 0
+    ];
+}
+
+/**
+ * Отримати топ студентів по швидкості завершення
+ */
+public function getTopPerformers(int $limit = 5): Collection
+{
+    return $this->progress()
+        ->where('is_completed', true)
+        ->with('user:id,name,last_name,email')
+        ->orderBy('time_spent', 'asc')
+        ->limit($limit)
+        ->get();
+}
+
+/**
+ * Scope для уроків з високим рівнем завершення
+ */
+public function scopeHighCompletion($query, float $threshold = 80.0)
+{
+    return $query->whereHas('progress', function($q) use ($threshold) {
+        $q->selectRaw('lesson_id, COUNT(*) as total, SUM(CASE WHEN is_completed = 1 THEN 1 ELSE 0 END) as completed')
+          ->groupBy('lesson_id')
+          ->havingRaw('(completed / total * 100) >= ?', [$threshold]);
+    });
+}
+
+/**
+ * Отримати середній час проходження уроку
+ */
+public function getAverageCompletionTimeAttribute(): int
+{
+    return $this->progress()
+        ->where('is_completed', true)
+        ->avg('time_spent') ?? 0;
+}
 
     /**
      * Отримати наступний урок в модулі

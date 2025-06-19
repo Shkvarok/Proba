@@ -157,8 +157,111 @@ public function lessonProgress(): HasMany
  */
 public function getCourseProgress(int $courseId): array
 {
-    $course = Course::findOrFail($courseId);
-    return $course->getUserProgress($this->id);
+    // Загальна кількість уроків в курсі
+    $totalLessons = \DB::table('lessons')
+        ->join('modules', 'lessons.module_id', '=', 'modules.id')
+        ->where('modules.course_id', $courseId)
+        ->count();
+
+    if ($totalLessons === 0) {
+        return [
+            'total_lessons' => 0,
+            'completed_lessons' => 0,
+            'progress_percentage' => 0,
+            'is_completed' => false,
+            'total_time_spent' => 0
+        ];
+    }
+
+    // Кількість завершених уроків
+    $completedLessons = $this->lessonProgress()
+        ->whereHas('lesson.module', function($query) use ($courseId) {
+            $query->where('course_id', $courseId);
+        })
+        ->where('is_completed', true)
+        ->count();
+
+    // Загальний час навчання
+    $totalTimeSpent = $this->lessonProgress()
+        ->whereHas('lesson.module', function($query) use ($courseId) {
+            $query->where('course_id', $courseId);
+        })
+        ->sum('time_spent');
+
+    $progressPercentage = round(($completedLessons / $totalLessons) * 100, 1);
+
+    return [
+        'total_lessons' => $totalLessons,
+        'completed_lessons' => $completedLessons,
+        'progress_percentage' => $progressPercentage,
+        'is_completed' => $progressPercentage >= 100,
+        'total_time_spent' => $totalTimeSpent ?? 0
+    ];
+}
+
+/**
+ * Отримати детальний прогрес по курсу з модулями та уроками
+ */
+public function getDetailedCourseProgress(int $courseId): array
+{
+    $modules = \DB::table('modules')
+        ->where('course_id', $courseId)
+        ->orderBy('position')
+        ->get();
+
+    $detailedProgress = [];
+
+    foreach ($modules as $module) {
+        $lessons = \DB::table('lessons')
+            ->where('module_id', $module->id)
+            ->orderBy('position')
+            ->get();
+
+        $moduleProgress = [
+            'module_id' => $module->id,
+            'module_title' => $module->title,
+            'lessons' => []
+        ];
+
+        foreach ($lessons as $lesson) {
+            $progress = $this->lessonProgress()
+                ->where('lesson_id', $lesson->id)
+                ->first();
+
+            $moduleProgress['lessons'][] = [
+                'lesson_id' => $lesson->id,
+                'lesson_title' => $lesson->title,
+                'lesson_type' => $lesson->type,
+                'is_completed' => $progress ? $progress->is_completed : false,
+                'progress_percentage' => $progress ? $progress->progress_percentage : 0,
+                'time_spent' => $progress ? $progress->time_spent : 0,
+                'formatted_time_spent' => $progress ? $progress->formatted_time_spent : '00:00',
+                'last_accessed_at' => $progress ? $progress->last_accessed_at : null,
+                'progress_status' => $progress ? 
+                    ($progress->is_completed ? 'completed' : 
+                        ($progress->started_at ? 'in_progress' : 'not_started')) : 'not_started'
+            ];
+        }
+
+        $detailedProgress[] = $moduleProgress;
+    }
+
+    return $detailedProgress;
+}
+
+/**
+ * Перевірити, чи користувач має доступ до курсу
+ */
+public function hasAccessToCourse(int $courseId): bool
+{
+    return $this->courseEnrollments()
+        ->where('course_id', $courseId)
+        ->where('is_active', true)
+        ->where(function($query) {
+            $query->whereNull('expires_at')
+                  ->orWhere('expires_at', '>', now());
+        })
+        ->exists();
 }
 
 /**
@@ -166,22 +269,26 @@ public function getCourseProgress(int $courseId): array
  */
 public function getAllCoursesProgress(): array
 {
-    // Отримуємо всі курси, на які підписаний користувач
-    $enrolledCourses = $this->enrolledCourses()->get();
-    
-    $progressData = [];
-    
-    foreach ($enrolledCourses as $course) {
-        $progressData[] = array_merge(
-            $course->getUserProgress($this->id),
-            [
-                'course_title' => $course->title,
-                'course_cover' => $course->cover_image_url,
-            ]
-        );
+    $enrollments = $this->courseEnrollments()
+        ->where('is_active', true)
+        ->with('course')
+        ->get();
+
+    $coursesProgress = [];
+
+    foreach ($enrollments as $enrollment) {
+        $progress = $this->getCourseProgress($enrollment->course_id);
+        
+        $coursesProgress[] = [
+            'course_id' => $enrollment->course_id,
+            'course_title' => $enrollment->course->title,
+            'enrolled_at' => $enrollment->enrolled_at,
+            'expires_at' => $enrollment->expires_at,
+            'progress' => $progress
+        ];
     }
-    
-    return $progressData;
+
+    return $coursesProgress;
 }
 
 /**
@@ -258,34 +365,61 @@ public function getRecentLessonActivity(int $limit = 10): \Illuminate\Database\E
  */
 public function getLearningStats(): array
 {
-    $totalCourses = $this->enrolledCourses()->count();
+    $totalCourses = $this->courseEnrollments()
+        ->where('is_active', true)
+        ->count();
+
     $completedCourses = 0;
-    $totalLessons = 0;
-    $completedLessons = 0;
+    $totalProgress = 0;
     $totalTimeSpent = 0;
 
-    foreach ($this->enrolledCourses as $course) {
-        $progress = $course->getUserProgress($this->id);
-        
-        $totalLessons += $progress['total_lessons'];
-        $completedLessons += $progress['completed_lessons'];
-        $totalTimeSpent += $progress['total_time_spent'];
+    $enrollments = $this->courseEnrollments()
+        ->where('is_active', true)
+        ->get();
+
+    foreach ($enrollments as $enrollment) {
+        $progress = $this->getCourseProgress($enrollment->course_id);
         
         if ($progress['is_completed']) {
             $completedCourses++;
         }
+        
+        $totalProgress += $progress['progress_percentage'];
+        $totalTimeSpent += $progress['total_time_spent'];
     }
+
+    $averageProgress = $totalCourses > 0 ? round($totalProgress / $totalCourses, 1) : 0;
 
     return [
         'total_courses' => $totalCourses,
         'completed_courses' => $completedCourses,
-        'course_completion_rate' => $totalCourses > 0 ? round($completedCourses / $totalCourses * 100, 2) : 0,
-        'total_lessons' => $totalLessons,
-        'completed_lessons' => $completedLessons,
-        'lesson_completion_rate' => $totalLessons > 0 ? round($completedLessons / $totalLessons * 100, 2) : 0,
+        'in_progress_courses' => $totalCourses - $completedCourses,
+        'average_progress' => $averageProgress,
         'total_time_spent' => $totalTimeSpent,
-        'average_time_per_lesson' => $completedLessons > 0 ? round($totalTimeSpent / $completedLessons) : 0,
+        'total_lessons_completed' => $this->lessonProgress()->completed()->count(),
+        'last_activity' => $this->lessonProgress()
+            ->orderBy('last_accessed_at', 'desc')
+            ->first()
+            ?->last_accessed_at
     ];
+}
+
+/**
+ * Перевірити, чи користувач є вчителем
+ */
+public function isTeacher(): bool
+{
+    return $this->role && in_array($this->role->name, ['teacher', 'admin', 'super_admin']);
+}
+
+
+
+/**
+ * Перевірити, чи користувач є супер адміном
+ */
+public function isSuperAdmin(): bool
+{
+    return $this->role && $this->role->name === 'super_admin';
 }
 
 /**

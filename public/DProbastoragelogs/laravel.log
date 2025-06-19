@@ -832,3 +832,18 @@
 [2025-06-18 17:56:16] local.INFO: Курси отримано успішно (повна версія) {"count":15} 
 [2025-06-18 17:56:22] local.INFO: Початок виконання методу indexOnly {"user_id":null,"params":[]} 
 [2025-06-18 17:56:23] local.INFO: Курси отримано успішно (тільки базова інформація) {"count":15} 
+[2025-06-19 12:14:08] local.INFO: CheckRole middleware: Start {"uri":"/api/courses/manage","method":"POST","roles":["teacher","admin","super_admin"]} 
+[2025-06-19 12:14:08] local.INFO: CheckRole middleware: User {"id":1,"email":"superadmin@example.com","role_id":1,"role":"super_admin"} 
+[2025-06-19 12:14:08] local.INFO: CheckRole middleware: Access granted (super_admin override)  
+[2025-06-19 12:14:08] local.INFO: CourseRequest::prepareForValidation {"method":"POST","all_data":{"title":"AI","description":"Test Description","category_id":"1","level_id":"1","price":"100"},"content_type":"multipart/form-data; boundary=--------------------------820516595729989872891415","has_method_field":false} 
+[2025-06-19 12:14:08] local.INFO: CourseRequest::prepareForValidation completed {"processed_data":{"title":"AI","description":"Test Description","category_id":1,"level_id":1,"price":100,"instructor_id":1},"final_method":"POST"} 
+[2025-06-19 12:14:09] local.INFO: === СТВОРЕННЯ КУРСУ === {"user_id":1,"request_data":{"title":"AI","description":"Test Description","category_id":1,"level_id":1,"price":100,"instructor_id":1},"has_cover_image":true,"content_type":"multipart/form-data; boundary=--------------------------820516595729989872891415"} 
+[2025-06-19 12:14:09] local.INFO: CourseRequest::getCourseData called {"method":"POST","is_update":false,"all_input":{"title":"AI","description":"Test Description","category_id":1,"level_id":1,"price":100,"instructor_id":1}} 
+[2025-06-19 12:14:09] local.INFO: CourseRequest::getCourseData returning: {"title":"AI","description":"Test Description","category_id":1,"instructor_id":1,"price":100,"level_id":1} 
+[2025-06-19 12:14:09] local.INFO: Дані для створення курсу: {"course_data":{"title":"AI","description":"Test Description","category_id":1,"instructor_id":1,"price":100,"level_id":1},"has_image":true} 
+[2025-06-19 12:14:09] local.INFO: CourseService::createCourse викликано {"data":{"title":"AI","description":"Test Description","category_id":1,"instructor_id":1,"price":100,"level_id":1},"has_cover_image":true} 
+[2025-06-19 12:14:09] local.INFO: Завантаження зображення обкладинки {"original_name":"Ai robot reading a book.jpg","mime_type":"image/jpeg","size":68409} 
+[2025-06-19 12:14:09] local.INFO: Зображення збережено {"path":"course-covers/course_1750335249_5puoBrBNDR.jpg","full_path":"D:\\Proba\\storage\\app/public/course-covers/course_1750335249_5puoBrBNDR.jpg","exists":true} 
+[2025-06-19 12:14:09] local.INFO: Зображення обкладинки завантажено {"path":"course-covers/course_1750335249_5puoBrBNDR.jpg"} 
+[2025-06-19 12:14:09] local.INFO: Курс створено в базі даних {"course_id":21,"cover_image":"course-covers/course_1750335249_5puoBrBNDR.jpg","instructor_id":1} 
+[2025-06-19 12:14:09] local.INFO: Курс успішно створено {"course_id":21,"title":"AI","cover_image":"course-covers/course_1750335249_5puoBrBNDR.jpg"} 

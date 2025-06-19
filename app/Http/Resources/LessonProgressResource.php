@@ -38,7 +38,8 @@ class LessonProgressResource extends JsonResource
                     'type' => $this->lesson->type,
                     'position' => $this->lesson->position,
                     'status' => $this->lesson->status,
-                    'estimated_duration' => $this->lesson->getEstimatedDuration(),
+                    'module_title' => $this->lesson->module ? $this->lesson->module->title : null,
+                    'course_title' => $this->lesson->module && $this->lesson->module->course ? $this->lesson->module->course->title : null,
                 ];
             }),
             
@@ -47,8 +48,9 @@ class LessonProgressResource extends JsonResource
                 return [
                     'id' => $this->user->id,
                     'name' => $this->user->name,
+                    'last_name' => $this->user->last_name,
+                    'full_name' => trim($this->user->name . ' ' . $this->user->last_name),
                     'email' => $this->user->email,
-                    'avatar' => $this->user->avatar,
                 ];
             }),
             
