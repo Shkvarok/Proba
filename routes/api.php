@@ -286,6 +286,7 @@ Route::middleware('auth:sanctum')->group(function () {
                     'id' => $enrollment->id,
                     'is_active' => $enrollment->is_active,
                     'expires_at' => $enrollment->expires_at,
+                    'enrollment_type' => $enrollment->enrollment_type,
                 ] : null,
                 'access_checks' => [
                     'is_admin' => $user->hasRole('admin') || $user->hasRole('super_admin'),
@@ -426,6 +427,8 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::get('/course-sales', [PaymentController::class, 'getCourseSales']);  // Звіт по курсах
         });
     });
+
+    
 
     /*
     |--------------------------------------------------------------------------
@@ -867,3 +870,5 @@ Route::middleware('auth:sanctum')->group(function () {
 
 |--------------------------------------------------------------------------
 */
+
+DB::table('course_enrollments')->truncate();

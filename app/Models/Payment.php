@@ -45,9 +45,30 @@ class Payment extends Model
     public function entity()
     {
         if ($this->entity_type === 'course') {
-            return $this->belongsTo(Course::class, 'entity_id');
+            return $this->course();
         }
             
         return null;
+    }
+
+    /**
+ * Атрибут для отримання назви сутності
+ */
+public function getEntityNameAttribute(): ?string
+{
+    if ($this->entity_type === 'course') {
+        $course = $this->course;
+        return $course ? $course->title : "Курс ID: {$this->entity_id}";
+    }
+    
+    return "Невідома сутність";
+}
+
+    /**
+     * Курс, пов'язаний з платежем (тільки якщо entity_type == 'course')
+     */
+    public function course(): BelongsTo
+    {
+        return $this->belongsTo(Course::class, 'entity_id')->where('entity_type', 'course');
     }
 }

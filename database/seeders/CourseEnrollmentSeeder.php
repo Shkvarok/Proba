@@ -26,9 +26,9 @@ class CourseEnrollmentSeeder extends Seeder
      */
     public function run(): void
     {
-        // Спочатку очищуємо існуючі підписки
-        CourseEnrollment::truncate();
-        
+        // Очищаємо таблицю перед сидуванням, щоб уникнути дублювань
+        DB::table('course_enrollments')->truncate();
+
         // Перевіряємо наявність необхідних даних
         $coursesCount = Course::count();
         $usersCount = User::count();
@@ -62,8 +62,6 @@ class CourseEnrollmentSeeder extends Seeder
         $enrollments = [];
         $now = now();
 
-        $this->command->info('Створюємо підписки для студентів...');
-
         // Створюємо підписки для кожного студента
         foreach ($students as $student) {
             // Кожен студент підписується на випадкову кількість курсів (1-5)
@@ -80,7 +78,7 @@ class CourseEnrollmentSeeder extends Seeder
                 }
 
                 // Визначаємо тип підписки
-                $enrollmentType = $this->getEnrollmentType($course);
+                $enrollmentType = $this->getRandomEnrollmentType($course);
                 
                 // Визначаємо дати
                 $enrolledAt = $this->getRandomEnrollmentDate();
@@ -95,7 +93,7 @@ class CourseEnrollmentSeeder extends Seeder
                     'enrolled_at' => $enrolledAt,
                     'expires_at' => $expiresAt,
                     'enrollment_type' => $enrollmentType,
-                    'payment_id' => null,
+                    'payment_id' => null, // Поки не створюємо платежі
                     'is_active' => $isActive,
                     'created_at' => $enrolledAt,
                     'updated_at' => $enrolledAt,
@@ -103,9 +101,7 @@ class CourseEnrollmentSeeder extends Seeder
             }
         }
 
-        $this->command->info('Створюємо підписки для викладачів...');
-
-        // Додаємо кілька підписок для викладачів
+        // Додаємо кілька підписок для викладачів (щоб вони мали доступ до курсів інших викладачів)
         $teacherRole = Role::where('name', 'teacher')->first();
         if ($teacherRole) {
             $teachers = User::where('role_id', $teacherRole->id)->get();
@@ -134,7 +130,7 @@ class CourseEnrollmentSeeder extends Seeder
                             'course_id' => $course->id,
                             'enrolled_at' => $enrolledAt,
                             'expires_at' => null, // Викладачі мають безстроковий доступ
-                            'enrollment_type' => 'purchase', // Викладачі "купують" доступ до курсів колег
+                            'enrollment_type' => 'purchase', // Використовуємо дозволене значення
                             'payment_id' => null,
                             'is_active' => true,
                             'created_at' => $enrolledAt,
@@ -147,10 +143,8 @@ class CourseEnrollmentSeeder extends Seeder
 
         // Вставляємо підписки в базу даних
         if (!empty($enrollments)) {
-            $this->command->info('Зберігаємо підписки в базу даних...');
-            
             // Розбиваємо на частини для уникнення помилок з великими вставками
-            $chunks = array_chunk($enrollments, 50);
+            $chunks = array_chunk($enrollments, 100);
             
             foreach ($chunks as $chunk) {
                 DB::table('course_enrollments')->insert($chunk);
@@ -164,24 +158,18 @@ class CourseEnrollmentSeeder extends Seeder
     }
 
     /**
-     * Отримати тип підписки залежно від ціни курсу
+     * Отримати випадковий тип підписки залежно від ціни курсу
+     * Використовуємо дозволені значення: 'purchase', 'subscription', 'free', 'gift'
      */
-    private function getEnrollmentType(Course $course): string
+    private function getRandomEnrollmentType(Course $course): string
     {
         if ($course->price == 0) {
             return 'free';
         }
-
         // Для платних курсів розподіляємо типи підписок
-        $rand = rand(1, 100);
-        
-        if ($rand <= 60) {
-            return 'purchase';
-        } elseif ($rand <= 85) {
-            return 'subscription';
-        } else {
-            return 'gift';
-        }
+        $types = ['purchase', 'subscription', 'gift'];
+        $weights = [60, 30, 10]; // 60% purchase, 30% subscription, 10% gift
+        return $this->getWeightedRandom($types, $weights);
     }
 
     /**
@@ -204,23 +192,15 @@ class CourseEnrollmentSeeder extends Seeder
     {
         switch ($enrollmentType) {
             case 'free':
-                // Безкоштовні курси мають безстроковий доступ
                 return null;
-                
             case 'purchase':
-                // Покупка дає безстроковий доступ
                 return null;
-                
             case 'subscription':
-                // Підписка обмежена в часі (зазвичай 1 місяць, 3 місяці або 1 рік)
                 $periods = [1, 3, 12]; // місяців
                 $selectedPeriod = $periods[array_rand($periods)];
                 return $enrolledAt->copy()->addMonths($selectedPeriod);
-                
             case 'gift':
-                // Подарунковий доступ може бути різним (3-12 місяців)
                 return $enrolledAt->copy()->addMonths(rand(3, 12));
-                
             default:
                 return $enrolledAt->copy()->addYear();
         }
@@ -242,6 +222,25 @@ class CourseEnrollmentSeeder extends Seeder
 
         // Якщо підписка не закінчилася, вона активна
         return $expiresAt->isFuture();
+    }
+
+    /**
+     * Вибрати випадковий елемент з урахуванням ваг
+     */
+    private function getWeightedRandom(array $items, array $weights): mixed
+    {
+        $totalWeight = array_sum($weights);
+        $random = rand(1, $totalWeight);
+        
+        $currentWeight = 0;
+        for ($i = 0; $i < count($items); $i++) {
+            $currentWeight += $weights[$i];
+            if ($random <= $currentWeight) {
+                return $items[$i];
+            }
+        }
+        
+        return $items[0]; // Fallback
     }
 
     /**
@@ -278,8 +277,7 @@ class CourseEnrollmentSeeder extends Seeder
             
         $this->command->info("\nТоп 5 курсів за кількістю підписок:");
         foreach ($courseStats as $stat) {
-            $courseTitle = $stat->course ? $stat->course->title : "Курс ID: {$stat->course_id}";
-            $this->command->info("  {$courseTitle}: {$stat->enrollments_count} підписок");
+            $this->command->info("  {$stat->course->title}: {$stat->enrollments_count} підписок");
         }
     }
 }

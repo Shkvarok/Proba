@@ -512,64 +512,170 @@ class PaymentController extends Controller
      * GET /api/payments/all
      */
     public function getPayments(Request $request)
-    {
-        $query = Payment::with(['user', 'entity']);
+{
+    try {
+        $query = Payment::with(['user:id,name,last_name,email']);
 
         // Фільтри
         if ($request->filled('user_id')) {
             $query->where('user_id', $request->user_id);
         }
+        
         if ($request->filled('course_id')) {
             $query->where('entity_type', 'course')->where('entity_id', $request->course_id);
         }
+        
         if ($request->filled('status')) {
             $query->where('payment_status', $request->status);
         }
+        
         if ($request->filled('date_from')) {
             $query->whereDate('created_at', '>=', $request->date_from);
         }
+        
         if ($request->filled('date_to')) {
             $query->whereDate('created_at', '<=', $request->date_to);
         }
 
+        // Отримуємо платежі з пагінацією
         $payments = $query->orderByDesc('created_at')->paginate(30);
+        
+        // Додаємо інформацію про курси для платежів за курси
+        $payments->getCollection()->transform(function ($payment) {
+            // Додаємо інформацію про пов'язану сутність
+            if ($payment->entity_type === 'course') {
+                $course = \App\Models\Course::find($payment->entity_id);
+                $payment->course = $course ? [
+                    'id' => $course->id,
+                    'title' => $course->title,
+                    'price' => $course->price
+                ] : null;
+            } else {
+                $payment->course = null;
+            }
+            
+            // Додаємо форматовану інформацію про користувача
+            if ($payment->user) {
+                $payment->user_name = trim($payment->user->name . ' ' . ($payment->user->last_name ?? ''));
+            }
+            
+            return $payment;
+        });
 
         return response()->json($payments);
+        
+    } catch (\Exception $e) {
+        Log::error('Error in getPayments', [
+            'error' => $e->getMessage(),
+            'trace' => $e->getTraceAsString()
+        ]);
+        
+        return response()->json([
+            'success' => false,
+            'message' => 'Помилка при отриманні платежів: ' . $e->getMessage()
+        ], 500);
     }
-
+}
     /**
      * Генерація фінансового звіту (адмін)
      * GET /api/payments/financial-report
      */
     public function getFinancialReport(Request $request)
     {
-        $query = Payment::query()->where('payment_status', 'completed');
-
-        // Фільтри
-        if ($request->filled('user_id')) {
-            $query->where('user_id', $request->user_id);
+        try {
+            $query = Payment::where('payment_status', 'completed');
+    
+            // Фільтри
+            if ($request->filled('user_id')) {
+                $query->where('user_id', $request->user_id);
+            }
+            
+            if ($request->filled('course_id')) {
+                $query->where('entity_type', 'course')->where('entity_id', $request->course_id);
+            }
+            
+            if ($request->filled('from') || $request->filled('date_from')) {
+                $dateFrom = $request->input('from') ?: $request->input('date_from');
+                $query->whereDate('created_at', '>=', $dateFrom);
+            }
+            
+            if ($request->filled('to') || $request->filled('date_to')) {
+                $dateTo = $request->input('to') ?: $request->input('date_to');
+                $query->whereDate('created_at', '<=', $dateTo);
+            }
+    
+            // Основна статистика
+            $totalAmount = $query->sum('amount');
+            $totalCount = $query->count();
+            $averageAmount = $totalCount > 0 ? $totalAmount / $totalCount : 0;
+    
+            // Статистика по курсах
+            $byCourse = $query->where('entity_type', 'course')
+                ->select('entity_id', DB::raw('SUM(amount) as total'), DB::raw('COUNT(*) as count'))
+                ->groupBy('entity_id')
+                ->orderByDesc('total')
+                ->limit(10)
+                ->get();
+    
+            // Додаємо назви курсів
+            $courseIds = $byCourse->pluck('entity_id');
+            $courses = \App\Models\Course::whereIn('id', $courseIds)
+                ->select('id', 'title')
+                ->get()
+                ->keyBy('id');
+    
+            $byCourse->transform(function ($item) use ($courses) {
+                $course = $courses->get($item->entity_id);
+                $item->course_title = $course ? $course->title : "Курс ID: {$item->entity_id}";
+                return $item;
+            });
+    
+            // Статистика по методах оплати
+            $byPaymentMethod = $query->select('payment_method', DB::raw('SUM(amount) as total'), DB::raw('COUNT(*) as count'))
+                ->groupBy('payment_method')
+                ->get();
+    
+            // Статистика по місяцях
+            $byMonth = $query->select(
+                    DB::raw('YEAR(created_at) as year'),
+                    DB::raw('MONTH(created_at) as month'),
+                    DB::raw('SUM(amount) as total'),
+                    DB::raw('COUNT(*) as count')
+                )
+                ->groupBy('year', 'month')
+                ->orderBy('year', 'desc')
+                ->orderBy('month', 'desc')
+                ->limit(12)
+                ->get();
+    
+            return response()->json([
+                'success' => true,
+                'report' => [
+                    'total_amount' => round($totalAmount, 2),
+                    'total_count' => $totalCount,
+                    'average_amount' => round($averageAmount, 2),
+                    'by_course' => $byCourse,
+                    'by_payment_method' => $byPaymentMethod,
+                    'by_month' => $byMonth,
+                    'period' => [
+                        'from' => $request->input('from') ?: $request->input('date_from'),
+                        'to' => $request->input('to') ?: $request->input('date_to'),
+                    ]
+                ]
+            ]);
+            
+        } catch (\Exception $e) {
+            Log::error('Financial report error', [
+                'error' => $e->getMessage(),
+                'filters' => $request->all()
+            ]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Помилка при генерації фінансового звіту',
+                'error' => config('app.debug') ? $e->getMessage() : 'Внутрішня помилка сервера'
+            ], 500);
         }
-        if ($request->filled('course_id')) {
-            $query->where('entity_type', 'course')->where('entity_id', $request->course_id);
-        }
-        if ($request->filled('date_from')) {
-            $query->whereDate('created_at', '>=', $request->date_from);
-        }
-        if ($request->filled('date_to')) {
-            $query->whereDate('created_at', '<=', $request->date_to);
-        }
-
-        $totalAmount = $query->sum('amount');
-        $totalCount = $query->count();
-        $byCourse = $query->select('entity_id', DB::raw('SUM(amount) as total'), DB::raw('COUNT(*) as count'))
-            ->groupBy('entity_id')
-            ->get();
-
-        return response()->json([
-            'total_amount' => $totalAmount,
-            'total_count' => $totalCount,
-            'by_course' => $byCourse,
-        ]);
     }
 
     /**
