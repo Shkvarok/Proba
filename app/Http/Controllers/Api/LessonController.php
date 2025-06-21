@@ -72,27 +72,21 @@ class LessonController extends Controller
                 'position' => 'nullable|integer|min:0',
                 'status' => 'nullable|in:active,disabled',
                 
-                // Поля для лекцій (або content, або file, але не обидва)
+                // Поля для лекцій (можна додати і content, і file)
                 'file' => [
                     'nullable',
                     'file',
                     'max:102400', // Збільшено до 100MB
-                    Rule::requiredIf(function () use ($request) {
-                        return $request->type === 'lecture' && empty($request->content);
-                    }),
                 ],
                 'content' => [
                     'nullable',
                     'string',
-                    Rule::requiredIf(function () use ($request) {
-                        return $request->type === 'lecture' && !$request->hasFile('file');
-                    }),
                 ],
                 'duration_minutes' => 'nullable|integer|min:1',
                 
                 // Поля для тестів
-                'source_type' => 'nullable|in:url,internal',
-                'external_url' => 'nullable|url|required_if:source_type,url',
+                'source_type' => 'nullable|in:external,internal',
+                'external_url' => 'nullable|url|required_if:source_type,external',
                 'time_limit_minutes' => 'nullable|integer|min:1',
                 'passing_score' => 'nullable|integer|min:0',
                 
@@ -152,14 +146,30 @@ class LessonController extends Controller
                     if (!$filePath) {
                         \Illuminate\Support\Facades\Log::error('Failed to store lecture file');
                         return response()->json([
-                            'message' => 'Помилка збереження файлу'
+                            'message' => 'Помилка збереження файлу лекції'
                         ], 500);
                     }
                     
                     $data['file_path'] = $filePath;
                     $data['file_type'] = $file->getClientMimeType();
                     $data['file_name'] = $file->getClientOriginalName();
-                    $data['content_type'] = 'file';
+                }
+                
+                // Визначаємо тип контенту для лекції
+                if ($request->type === 'lecture') {
+                    if ($request->hasFile('file') && !empty($request->content)) {
+                        // Якщо є і файл, і контент - встановлюємо тип 'mixed'
+                        $data['content_type'] = 'mixed';
+                    } elseif ($request->hasFile('file')) {
+                        // Якщо тільки файл
+                        $data['content_type'] = 'file';
+                    } elseif (!empty($request->content)) {
+                        // Якщо тільки контент
+                        $data['content_type'] = 'text';
+                    } else {
+                        // Якщо нічого не вказано - встановлюємо текстовий тип за замовчуванням
+                        $data['content_type'] = 'text';
+                    }
                 }
                 
                 // Обробка файлу для додаткового матеріалу
@@ -296,8 +306,20 @@ class LessonController extends Controller
                 'position' => 'nullable|integer|min:0',
                 'status' => 'nullable|in:active,disabled',
                 'duration_minutes' => 'nullable|integer|min:1',
-                'content_type' => 'nullable|in:text,file',
+                'content_type' => 'nullable|in:text,file,mixed',
                 'file' => 'nullable|file|max:102400', // Збільшено ліміт до 100MB
+                
+                // Поля для додаткових матеріалів
+                'material_type' => 'nullable|in:url,video,file,text,image',
+                'material_file' => 'nullable|file|max:102400',
+                'material_url' => 'nullable|url',
+                'material_content' => 'nullable|string',
+                
+                // Поля для тестів
+                'source_type' => 'nullable|in:external,internal',
+                'external_url' => 'nullable|url',
+                'time_limit_minutes' => 'nullable|integer|min:1',
+                'passing_score' => 'nullable|integer|min:0',
             ]);
             
             if ($validator->fails()) {
@@ -342,7 +364,7 @@ class LessonController extends Controller
                 }
                 
                 // Обробка файлу
-                if ($request->hasFile('file') && $request->content_type === 'file') {
+                if ($request->hasFile('file')) {
                     // Видаляємо старий файл, якщо він існує
                     if ($lecture->file_path) {
                         Storage::disk('public')->delete($lecture->file_path);
@@ -352,24 +374,31 @@ class LessonController extends Controller
                     $fileName = time() . '_' . $file->getClientOriginalName();
                     $filePath = $file->storeAs('lessons/lectures', $fileName, 'public');
                     
-                    $lecture->content_type = 'file';
                     $lecture->file_path = $filePath;
                     $lecture->file_type = $file->getClientMimeType();
                     $lecture->file_name = $file->getClientOriginalName();
-                    $lecture->content = null; // Очищаємо текстовий контент
+                    
+                    // Визначаємо тип контенту
+                    if ($request->has('content') && !empty($request->content)) {
+                        $lecture->content_type = 'mixed';
+                        $lecture->content = $request->content;
+                    } else {
+                        $lecture->content_type = 'file';
+                        $lecture->content = null;
+                    }
                 } 
                 // Обробка текстового контенту
-                elseif ($request->has('content') && $request->content_type === 'text') {
+                elseif ($request->has('content') && !empty($request->content)) {
                     // Видаляємо старий файл, якщо він існує
                     if ($lecture->file_path) {
                         Storage::disk('public')->delete($lecture->file_path);
+                        $lecture->file_path = null;
+                        $lecture->file_type = null;
+                        $lecture->file_name = null;
                     }
                     
                     $lecture->content_type = 'text';
                     $lecture->content = $request->content;
-                    $lecture->file_path = null;
-                    $lecture->file_type = null;
-                    $lecture->file_name = null;
                 }
                 // Встановлення типу контенту без зміни самого контенту
                 elseif ($request->has('content_type')) {
@@ -378,6 +407,72 @@ class LessonController extends Controller
                 
                 // Зберігаємо лекцію
                 $lecture->save();
+            }
+            
+            // Якщо це тест, оновлюємо специфічні поля
+            if ($lesson->type === 'test') {
+                $test = $lesson->test;
+                if (!$test) {
+                    $test = new \App\Models\LessonTest();
+                    $test->lesson_id = $lesson->id;
+                }
+                
+                if ($request->has('source_type')) {
+                    $test->source_type = $request->source_type;
+                }
+                
+                if ($request->has('external_url')) {
+                    $test->external_url = $request->external_url;
+                }
+                
+                if ($request->has('time_limit_minutes')) {
+                    $test->time_limit_minutes = (int)$request->time_limit_minutes;
+                }
+                
+                if ($request->has('passing_score')) {
+                    $test->passing_score = (int)$request->passing_score;
+                }
+                
+                $test->save();
+            }
+            
+            // Якщо це додатковий матеріал, оновлюємо специфічні поля
+            if ($lesson->type === 'extra_material') {
+                $material = $lesson->extraMaterial;
+                if (!$material) {
+                    $material = new \App\Models\LessonExtraMaterial();
+                    $material->lesson_id = $lesson->id;
+                }
+                
+                if ($request->has('material_type')) {
+                    $material->material_type = $request->material_type;
+                }
+                
+                // Обробка файлу для додаткового матеріалу
+                if ($request->hasFile('material_file')) {
+                    // Видаляємо старий файл, якщо він існує
+                    if ($material->file_path) {
+                        Storage::disk('public')->delete($material->file_path);
+                    }
+                    
+                    $file = $request->file('material_file');
+                    $fileName = time() . '_' . $file->getClientOriginalName();
+                    $filePath = $file->storeAs('lessons/materials', $fileName, 'public');
+                    
+                    $material->file_path = $filePath;
+                    $material->file_type = $file->getClientMimeType();
+                    $material->file_name = $file->getClientOriginalName();
+                }
+                
+                if ($request->has('material_url')) {
+                    $material->url = $request->material_url;
+                }
+                
+                if ($request->has('material_content')) {
+                    $material->content = $request->material_content;
+                }
+                
+                $material->save();
             }
             
             // Оновлюємо дані з бази

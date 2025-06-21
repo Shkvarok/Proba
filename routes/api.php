@@ -871,4 +871,3 @@ Route::middleware('auth:sanctum')->group(function () {
 |--------------------------------------------------------------------------
 */
 
-DB::table('course_enrollments')->truncate();

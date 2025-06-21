@@ -13,7 +13,7 @@ class LessonLecture extends Model
     protected $fillable = [
         'lesson_id',
         'content',
-        'content_type', // 'text' або 'file'
+        'content_type', // 'text', 'file' або 'mixed'
         'file_path',
         'file_type',
         'file_name',

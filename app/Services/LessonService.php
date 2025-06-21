@@ -67,15 +67,31 @@ class LessonService
                     'duration_minutes' => $data['duration_minutes'] ?? null,
                 ];
                 
-                // Визначаємо тип контенту лекції (текст або файл)
-                if (isset($data['content'])) {
-                    $lectureData['content'] = $data['content'];
-                    $lectureData['content_type'] = 'text';
-                } elseif (isset($data['file_path'])) {
-                    $lectureData['file_path'] = $data['file_path'];
-                    $lectureData['file_type'] = $data['file_type'] ?? null;
-                    $lectureData['file_name'] = $data['file_name'] ?? null;
-                    $lectureData['content_type'] = 'file';
+                // Визначаємо тип контенту лекції (текст, файл або mixed)
+                if (isset($data['content_type'])) {
+                    $lectureData['content_type'] = $data['content_type'];
+                    
+                    // Встановлюємо контент відповідно до типу
+                    if ($data['content_type'] === 'text' || $data['content_type'] === 'mixed') {
+                        $lectureData['content'] = $data['content'] ?? null;
+                    }
+                    
+                    if ($data['content_type'] === 'file' || $data['content_type'] === 'mixed') {
+                        $lectureData['file_path'] = $data['file_path'] ?? null;
+                        $lectureData['file_type'] = $data['file_type'] ?? null;
+                        $lectureData['file_name'] = $data['file_name'] ?? null;
+                    }
+                } else {
+                    // Застаріла логіка для сумісності
+                    if (isset($data['content'])) {
+                        $lectureData['content'] = $data['content'];
+                        $lectureData['content_type'] = 'text';
+                    } elseif (isset($data['file_path'])) {
+                        $lectureData['file_path'] = $data['file_path'];
+                        $lectureData['file_type'] = $data['file_type'] ?? null;
+                        $lectureData['file_name'] = $data['file_name'] ?? null;
+                        $lectureData['content_type'] = 'file';
+                    }
                 }
                 
                 LessonLecture::create($lectureData);
@@ -84,12 +100,12 @@ class LessonService
             case 'test':
                 $testData = [
                     'lesson_id' => $lesson->id,
-                    'source_type' => $data['source_type'] ?? 'url', // За замовчуванням URL
+                    'source_type' => $data['source_type'] ?? 'external', // За замовчуванням external
                     'time_limit_minutes' => $data['time_limit_minutes'] ?? null,
                     'passing_score' => $data['passing_score'] ?? null,
                 ];
                 
-                if ($testData['source_type'] === 'url' && isset($data['external_url'])) {
+                if ($testData['source_type'] === 'external' && isset($data['external_url'])) {
                     $testData['external_url'] = $data['external_url'];
                 }
                 
