@@ -9,42 +9,36 @@ use Illuminate\Support\Facades\Auth;
 
 class NotificationSubscriptionController extends Controller
 {
-    // Підписатися (авторизований або email)
+    // Підписатися (тільки авторизований користувач)
     public function subscribe(Request $request)
     {
         $data = $request->validate([
             'type' => 'required|string|max:50',
-            'email' => 'nullable|email',
         ]);
         $user = Auth::user();
-        $userId = $user ? $user->id : null;
-        $email = $data['email'] ?? ($user ? $user->email : null);
-        if (!$userId && !$email) {
-            return response()->json(['success' => false, 'message' => 'Потрібен email або авторизація'], 422);
+        if (!$user) {
+            return response()->json(['success' => false, 'message' => 'Неавторизовано'], 401);
         }
         $subscription = NotificationSubscription::updateOrCreate(
-            [ 'user_id' => $userId, 'email' => $email, 'type' => $data['type'] ],
+            [ 'user_id' => $user->id, 'email' => $user->email, 'type' => $data['type'] ],
             [ 'is_active' => true ]
         );
         return response()->json(['success' => true, 'subscription' => $subscription]);
     }
 
-    // Відписатися
+    // Відписатися (тільки авторизований користувач)
     public function unsubscribe(Request $request)
     {
         $data = $request->validate([
             'type' => 'required|string|max:50',
-            'email' => 'nullable|email',
         ]);
         $user = Auth::user();
-        $userId = $user ? $user->id : null;
-        $email = $data['email'] ?? ($user ? $user->email : null);
-        if (!$userId && !$email) {
-            return response()->json(['success' => false, 'message' => 'Потрібен email або авторизація'], 422);
+        if (!$user) {
+            return response()->json(['success' => false, 'message' => 'Неавторизовано'], 401);
         }
         $subscription = NotificationSubscription::where([
-            'user_id' => $userId,
-            'email' => $email,
+            'user_id' => $user->id,
+            'email' => $user->email,
             'type' => $data['type'],
         ])->first();
         if ($subscription) {
@@ -77,5 +71,41 @@ class NotificationSubscriptionController extends Controller
         $subscription = NotificationSubscription::findOrFail($id);
         $subscription->update($data);
         return response()->json(['success' => true, 'subscription' => $subscription]);
+    }
+
+    /**
+     * Надіслати email всім підписаним на певний тип розсилки
+     */
+    public function sendToAll(Request $request)
+    {
+        $data = $request->validate([
+            'subject' => 'required|string|max:255',
+            'message' => 'required|string',
+            'type' => 'required|string|max:50',
+        ]);
+
+        $subscriptions = NotificationSubscription::where('type', $data['type'])
+            ->where('is_active', true)
+            ->whereNotNull('email')
+            ->pluck('email')
+            ->unique();
+
+        $sent = 0;
+        foreach ($subscriptions as $email) {
+            try {
+                \Mail::raw($data['message'], function ($msg) use ($email, $data) {
+                    $msg->to($email)->subject($data['subject']);
+                });
+                $sent++;
+            } catch (\Exception $e) {
+                // Можна залогувати помилку
+            }
+        }
+
+        return response()->json([
+            'success' => true,
+            'sent_count' => $sent,
+            'emails' => $subscriptions,
+        ]);
     }
 } 

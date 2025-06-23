@@ -65,4 +65,70 @@ class CourseEnrollment extends Model
 
         return $this->expires_at->isFuture();
     }
+    
+    /**
+     * Отримати кількість днів до закінчення підписки
+     */
+    public function getRemainingDays(): ?int
+    {
+        if ($this->expires_at === null) {
+            return null; // Безстроковий доступ
+        }
+        
+        if ($this->expires_at->isPast()) {
+            return 0; // Підписка закінчилася
+        }
+        
+        return (int) $this->expires_at->diffInDays(now());
+    }
+    
+    /**
+     * Отримати статус підписки у вигляді тексту
+     */
+    public function getStatusText(): string
+    {
+        if (!$this->is_active) {
+            return 'Неактивна';
+        }
+        
+        if ($this->expires_at === null) {
+            return 'Безстроковий доступ';
+        }
+        
+        if ($this->expires_at->isPast()) {
+            return 'Закінчилася';
+        }
+        
+        $days = $this->getRemainingDays();
+        
+        if ($days === 0) {
+            return 'Закінчується сьогодні';
+        } elseif ($days === 1) {
+            return 'Закінчується завтра';
+        } else {
+            return "Залишилося {$days} днів";
+        }
+    }
+    
+    /**
+     * Scope для активних підписок
+     */
+    public function scopeActive($query)
+    {
+        return $query->where('is_active', true)
+                    ->where(function ($q) {
+                        $q->whereNull('expires_at')
+                          ->orWhere('expires_at', '>', now());
+                    });
+    }
+    
+    /**
+     * Scope для підписок, що закінчуються
+     */
+    public function scopeExpiring($query, $days = 7)
+    {
+        return $query->where('is_active', true)
+                    ->whereNotNull('expires_at')
+                    ->whereBetween('expires_at', [now(), now()->addDays($days)]);
+    }
 }

@@ -14,6 +14,7 @@ use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 
 class CourseController extends Controller
 {
@@ -115,7 +116,7 @@ class CourseController extends Controller
     }
 
     /**
-     * Store a newly created course in storage.
+     * Зберегти курс
      */
     public function store(CourseRequest $request): JsonResponse
     {
@@ -137,7 +138,6 @@ class CourseController extends Controller
                 $courseData['instructor_id'] = auth()->id();
             }
             
-            // Обробляємо завантаження зображення
             $coverImage = $request->hasFile('cover_image') ? $request->file('cover_image') : null;
             
             Log::info('Дані для створення курсу:', [
@@ -148,7 +148,6 @@ class CourseController extends Controller
             // Створюємо курс через сервіс
             $course = $this->courseService->createCourse($courseData, $coverImage);
             
-            // Завантажуємо відносини для відповіді
             $course->load(['category', 'instructor', 'level']);
             
             DB::commit();
@@ -182,7 +181,7 @@ class CourseController extends Controller
     }
 
     /**
-     * Display the specified course (з базовою інформацією).
+     * Показати обраний курс(з базовою інформацією).
      */
     public function show(int $id): JsonResponse
     {
@@ -377,7 +376,7 @@ class CourseController extends Controller
         $userId = auth()->id();
         $perPage = min($request->input('per_page', 15), 100);
         
-        $courses = $this->courseService->getCoursesByInstructorId($userId, $perPage);
+        $courses = $this->courseService->getCoursesByInstructorId($userId);
         $courses->load(['category', 'instructor', 'level']);
         
         return CourseResource::collection($courses);
@@ -732,40 +731,6 @@ class CourseController extends Controller
                 'success' => false,
                 'message' => 'Помилка при знятті курсу з публікації: ' . $e->getMessage()
             ], $e->getCode() == 404 ? 404 : 500);
-        }
-    }
-
-    /**
-     * Get course content statistics
-     */
-    public function getContentStats(int $id): JsonResponse
-    {
-        try {
-            $course = $this->courseService->getCourseById($id);
-            
-            $stats = [
-                'modules_count' => $course->modules()->count(),
-                'lessons_count' => \App\Models\Lesson::whereHas('module', function($query) use ($id) {
-                    $query->where('course_id', $id);
-                })->count(),
-                'tests_count' => \App\Models\InternalTest::whereHas('lesson.module', function($query) use ($id) {
-                    $query->where('course_id', $id);
-                })->count(),
-                'total_duration' => $this->courseService->calculateCourseDuration($id),
-                'completion_rate' => $this->courseService->getCourseCompletionRate($id),
-                'enrollments_count' => $course->enrollments()->where('is_active', true)->count()
-            ];
-            
-            return response()->json([
-                'success' => true,
-                'stats' => $stats
-            ]);
-            
-        } catch (Exception $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Помилка при отриманні статистики курсу: ' . $e->getMessage()
-            ], 500);
         }
     }
 

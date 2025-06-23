@@ -49,6 +49,14 @@ class ApiServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        //
+         // Налаштування JSON для всього додатку
+    if (app()->environment('local', 'development')) {
+        \Illuminate\Http\Resources\Json\JsonResource::withoutWrapping();
+        
+        // Налаштування JSON форматування
+        app()->bind('json.flags', function() {
+            return JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES;
+        });
+    }
     }
 }

@@ -510,7 +510,7 @@ Route::middleware('auth:sanctum')->group(function () {
             // Масові операції та аналітика
             Route::post('/bulk-action', [CourseController::class, 'bulkAction']);                            // Масові операції
             Route::get('/{id}/analytics', [CourseController::class, 'getContentStats'])->where('id', '[0-9]+'); // Аналітика курсу
-            Route::get('/{id}/completion-stats', [\App\Http\Controllers\Api\CourseController::class, 'getCompletionStats'])->where('id', '[0-9]+'); // Статистика завершення
+            Route::get('/{id}/completion-stats', [CourseController::class, 'getCompletionStats'])->where('id', '[0-9]+'); // Статистика завершення
         });
         
         /*
@@ -714,159 +714,10 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/my', [\App\Http\Controllers\Api\NotificationSubscriptionController::class, 'getMySubscriptions']);      // Мої підписки
         Route::put('/{id}', [\App\Http\Controllers\Api\NotificationSubscriptionController::class, 'updateSubscription']);    // Оновити підписку
     });
-
-    /*
-    |--------------------------------------------------------------------------
-    | Тестові маршрути для розробки
-    |--------------------------------------------------------------------------
-    */
     
-    // Тест створення курсів
-    Route::get('/test-course-creation', function() {
-        return response()->json([
-            'message' => 'Тестовий маршрут для перевірки створення курсів',
-            'timestamp' => now(),
-            'user' => auth()->user() ? [
-                'id' => auth()->id(),
-                'email' => auth()->user()->email,
-                'role' => auth()->user()->role->name ?? 'no_role'
-            ] : null
-        ]);
-    });
-
-    // Тест завантаження файлів
-    Route::post('/test-course-upload', function(Request $request) {
-        return response()->json([
-            'method' => $request->method(),
-            'content_type' => $request->header('Content-Type'),
-            'has_file' => $request->hasFile('cover_image'),
-            'all_data' => $request->except(['cover_image']),
-            'file_info' => $request->hasFile('cover_image') ? [
-                'name' => $request->file('cover_image')->getClientOriginalName(),
-                'size' => $request->file('cover_image')->getSize(),
-                'mime' => $request->file('cover_image')->getMimeType()
-            ] : null
-        ]);
-    });
-
-    // Тест обробки форм
-    Route::post('/test-form-data', function(Request $request) {
-        return response()->json([
-            'method' => $request->method(),
-            'content_type' => $request->header('Content-Type'),
-            'has_method_field' => $request->has('_method'),
-            '_method_value' => $request->input('_method'),
-            'all_data' => $request->except(['cover_image']),
-            'all_files' => array_keys($request->allFiles()),
-            'has_cover_image' => $request->hasFile('cover_image'),
-            'price_type' => gettype($request->input('price')),
-            'price_value' => $request->input('price'),
-            'is_published_type' => gettype($request->input('is_published')),
-            'is_published_value' => $request->input('is_published'),
-        ]);
-    });
-
-    // Тестовий маршрут PUT через POST
-    Route::match(['PUT', 'POST'], '/test-put-course/{id}', function(Request $request, $id) {
-        Log::info('Test PUT course called', [
-            'id' => $id,
-            'method' => $request->method(),
-            'has_method' => $request->has('_method'),
-            'method_value' => $request->input('_method'),
-            'all_data' => $request->except(['cover_image'])
-        ]);
-
-        // Симулюємо CourseRequest логіку
-        $data = $request->only([
-            'title', 'description', 'category_id', 'instructor_id', 'price',
-            'discount_price', 'level_id', 'language', 'promo_video_url',
-            'requirements', 'what_you_learn', 'is_published'
-        ]);
-
-        // Фільтруємо тільки поля які прийшли
-        $filteredData = array_filter($data, function($value, $key) use ($request) {
-            return $request->has($key);
-        }, ARRAY_FILTER_USE_BOTH);
-
-        return response()->json([
-            'success' => true,
-            'course_id' => $id,
-            'method' => $request->method(),
-            'received_data' => $data,
-            'filtered_data' => $filteredData,
-            'fields_present' => array_keys($request->except(['_token', '_method', 'cover_image'])),
-            'would_update' => !empty($filteredData) ? 'Yes' : 'No (no data to update)'
-        ]);
-    });
-
-    /*
-    |--------------------------------------------------------------------------
-    | Тестові маршрути для прогресу
-    |--------------------------------------------------------------------------
-    */
-    
-    // Створити тестовий прогрес для курсу
-    Route::post('/test/create-sample-progress/{courseId}', function($courseId) {
-        $course = \App\Models\Course::findOrFail($courseId);
-        $userId = auth()->id();
-        $lessons = $course->lessons()->limit(5)->get();
-        $created = [];
-        
-        foreach ($lessons as $lesson) {
-            $progress = \App\Models\LessonProgress::firstOrCreate(
-                [ 'user_id' => $userId, 'lesson_id' => $lesson->id ],
-                [
-                    'progress_percentage' => rand(10, 100),
-                    'time_spent' => rand(300, 3600),
-                    'started_at' => now()->subHours(rand(1, 48)),
-                    'last_accessed_at' => now()->subHours(rand(0, 24)),
-                ]
-            );
-            
-            if ($progress->progress_percentage >= 100) {
-                $progress->is_completed = true;
-                $progress->completed_at = now()->subHours(rand(0, 24));
-                $progress->save();
-            }
-            
-            $created[] = $progress;
-        }
-        
-        return response()->json([
-            'success' => true,
-            'message' => 'Тестовий прогрес створено',
-            'created_count' => count($created)
-        ]);
-    });
-    
-    // Очистити весь прогрес користувача
-    Route::delete('/test/clear-my-progress', function() {
-        $userId = auth()->id();
-        $deleted = \App\Models\LessonProgress::where('user_id', $userId)->delete();
-        
-        return response()->json([
-            'success' => true,
-            'message' => 'Весь прогрес користувача видалено',
-            'deleted_count' => $deleted
-        ]);
-    });
-
     /*
     |--------------------------------------------------------------------------
     | Кінець захищених маршрутів
     |--------------------------------------------------------------------------
     */
 });
-
-/*
-|--------------------------------------------------------------------------
-| Кінець файлу маршрутів
-|--------------------------------------------------------------------------
-
-| 1. Публічні маршрути - доступні без автентифікації
-| 2. Захищені маршрути - потребують автентифікації
-| 3. Ролеві маршрути - додаткові обмеження за ролями
-
-|--------------------------------------------------------------------------
-*/
-

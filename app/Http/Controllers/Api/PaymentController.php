@@ -87,16 +87,21 @@ class PaymentController extends Controller
             $courseObj = $course instanceof Collection ? $course->first() : $course;
             $paymentObj = $payment instanceof Collection ? $payment->first() : $payment;
             
-            $paymentForm = $this->liqpayService->createCoursePaymentForm($userObj, $courseObj, $paymentObj);
-            
-            DB::commit();
-            
-            return response()->json([
-                'success' => true,
-                'message' => 'Платіж ініційовано',
-                'payment_id' => $payment->id,
-                'liqpay_data' => $paymentForm
-            ], 200);
+              $paymentForm = $this->liqpayService->createCoursePaymentForm($userObj, $courseObj, $paymentObj);
+        
+        DB::commit();
+        
+        return response()->json([
+            'success' => true,
+            'message' => 'Платіж ініційовано',
+            'payment_id' => $payment->id,
+            'liqpay' => [
+                'url' => $paymentForm['url'],
+                'data' => $paymentForm['data'],
+                'signature' => $paymentForm['signature'],
+                'form_html' => $paymentForm['form_html']
+            ]
+        ], 200);
             
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
             DB::rollBack();
