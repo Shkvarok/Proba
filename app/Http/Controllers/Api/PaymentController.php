@@ -170,52 +170,39 @@ class PaymentController extends Controller
     public function paymentSuccess(Request $request, $courseId)
     {
         try {
-            $user = Auth::user();
-            
-            if (!$user) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Користувач не автентифікований'
-                ], 401);
-            }
-            
             $course = Course::findOrFail($courseId);
-            
-            // Перевіряємо, чи є у користувача підписка на цей курс
-            $enrollment = CourseEnrollment::where('user_id', $user->id)
-                ->where('course_id', $course->id)
-                ->where('is_active', true)
+
+            // Знаходимо останній успішний платіж для цього курсу
+            $payment = Payment::where('entity_type', 'course')
+                ->where('entity_id', $courseId)
+                ->where('payment_status', 'completed')
+                ->orderByDesc('created_at')
                 ->first();
-                
-            if ($enrollment) {
-                return response()->json([
-                    'success' => true,
-                    'message' => 'Оплата успішна! Ви отримали доступ до курсу.',
-                    'enrollment' => $enrollment,
-                    'course' => $course
-                ]);
-            }
-            
-            // Відстежуємо потенційну затримку у створенні підписки
+
+            // Знаходимо підписку по payment_id (якщо є)
+            $enrollment = $payment
+                ? CourseEnrollment::where('payment_id', $payment->id)->first()
+                : null;
+
             return response()->json([
                 'success' => true,
-                'message' => 'Оплата в обробці. Доступ до курсу буде надано найближчим часом.',
-                'course' => $course
+                'message' => $enrollment
+                    ? 'Оплата успішна! Ви отримали доступ до курсу.'
+                    : 'Оплата в обробці. Доступ буде надано найближчим часом.',
+                'course' => $course,
+                'payment' => $payment,
+                'enrollment' => $enrollment,
             ]);
-            
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
             return response()->json([
                 'success' => false,
                 'message' => 'Курс не знайдено'
             ], 404);
-            
         } catch (\Exception $e) {
             Log::error('Payment success page error', [
                 'course_id' => $courseId,
-                'user_id' => Auth::id(),
                 'error' => $e->getMessage()
             ]);
-            
             return response()->json([
                 'success' => false,
                 'message' => 'Помилка при обробці результату оплати'
@@ -516,10 +503,11 @@ class PaymentController extends Controller
      * Перегляд усіх оплат з фільтрами (адмін)
      * GET /api/payments/all
      */
-    public function getPayments(Request $request)
+   public function getPayments(Request $request)
 {
     try {
-        $query = Payment::with(['user:id,name,last_name,email']);
+        // Використовуємо тільки безпечні зв'язки
+        $query = Payment::with(['user:id,name,last_name,email', 'course:id,title,price']);
 
         // Фільтри
         if ($request->filled('user_id')) {
@@ -545,24 +533,26 @@ class PaymentController extends Controller
         // Отримуємо платежі з пагінацією
         $payments = $query->orderByDesc('created_at')->paginate(30);
         
-        // Додаємо інформацію про курси для платежів за курси
+        // Безпечно додаємо інформацію про курси
         $payments->getCollection()->transform(function ($payment) {
-            // Додаємо інформацію про пов'язану сутність
-            if ($payment->entity_type === 'course') {
-                $course = \App\Models\Course::find($payment->entity_id);
-                $payment->course = $course ? [
-                    'id' => $course->id,
-                    'title' => $course->title,
-                    'price' => $course->price
-                ] : null;
+            // Використовуємо course зв'язок замість entity
+            if ($payment->entity_type === 'course' && $payment->course) {
+                $payment->course_info = [
+                    'id' => $payment->course->id,
+                    'title' => $payment->course->title,
+                    'price' => $payment->course->price
+                ];
             } else {
-                $payment->course = null;
+                $payment->course_info = null;
             }
             
             // Додаємо форматовану інформацію про користувача
             if ($payment->user) {
                 $payment->user_name = trim($payment->user->name . ' ' . ($payment->user->last_name ?? ''));
             }
+            
+            // Видаляємо course зв'язок з відповіді для економії трафіку
+            unset($payment->course);
             
             return $payment;
         });

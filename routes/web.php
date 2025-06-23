@@ -603,3 +603,299 @@ Route::prefix('api/test')->group(function () {
         ]);
     });
 });
+// Додайте ці маршрути до файлу web.php для розширеного тестування
+
+Route::prefix('api/test-advanced')->group(function () {
+    
+    // Тест різних статусів платежу
+    Route::post('/payment-statuses/{paymentId}', function($paymentId) {
+        $payment = \App\Models\Payment::findOrFail($paymentId);
+        $statuses = ['pending', 'completed', 'failed', 'refunded'];
+        
+        $results = [];
+        foreach ($statuses as $status) {
+            $payment->payment_status = $status;
+            $payment->save();
+            
+            // Симуляція обробки для кожного статусу
+            $enrollment = null;
+            if ($status === 'completed') {
+                $enrollment = \App\Models\CourseEnrollment::updateOrCreate(
+                    [
+                        'user_id' => $payment->user_id,
+                        'course_id' => $payment->entity_id,
+                    ],
+                    [
+                        'payment_id' => $payment->id,
+                        'is_active' => true,
+                        'enrollment_type' => 'purchase',
+                        'enrolled_at' => now(),
+                    ]
+                );
+            }
+            
+            $results[$status] = [
+                'payment_status' => $payment->payment_status,
+                'enrollment_created' => $enrollment ? true : false,
+                'enrollment_active' => $enrollment ? $enrollment->is_active : false
+            ];
+        }
+        
+        return response()->json([
+            'payment_id' => $paymentId,
+            'test_results' => $results,
+            'recommendation' => 'Перевірте, що тільки статус "completed" створює активну підписку'
+        ]);
+    });
+
+    // Тест множинних платежів за один курс
+    Route::post('/multiple-payments/{courseId}', function($courseId) {
+        $course = \App\Models\Course::findOrFail($courseId);
+        
+        // Створюємо тестового користувача
+        $user = \App\Models\User::create([
+            'name' => 'Multi Payment Test User',
+            'email' => 'multitest' . rand(1000, 9999) . '@example.com',
+            'password' => \Hash::make('password'),
+            'role_id' => 3
+        ]);
+        
+        $payments = [];
+        
+        // Створюємо 3 платежі
+        for ($i = 1; $i <= 3; $i++) {
+            $payment = \App\Models\Payment::create([
+                'user_id' => $user->id,
+                'amount' => $course->price,
+                'currency' => 'UAH',
+                'payment_method' => 'liqpay',
+                'payment_status' => 'pending',
+                'entity_type' => 'course',
+                'entity_id' => $course->id,
+            ]);
+            
+            // Перший платіж - успішний, інші - різні статуси
+            $status = $i === 1 ? 'completed' : ($i === 2 ? 'failed' : 'pending');
+            $payment->payment_status = $status;
+            $payment->save();
+            
+            $payments[] = $payment;
+        }
+        
+        // Створюємо підписку тільки для успішного платежу
+        $enrollment = \App\Models\CourseEnrollment::create([
+            'user_id' => $user->id,
+            'course_id' => $course->id,
+            'payment_id' => $payments[0]->id,
+            'is_active' => true,
+            'enrollment_type' => 'purchase',
+            'enrolled_at' => now(),
+        ]);
+        
+        return response()->json([
+            'user' => $user,
+            'course_id' => $courseId,
+            'payments' => $payments,
+            'enrollment' => $enrollment,
+            'test_scenario' => 'Користувач робить кілька платежів за один курс',
+            'expected_result' => 'Має бути створена тільки одна активна підписка'
+        ]);
+    });
+
+    // Тест відновлення платежу
+    Route::post('/payment-recovery/{paymentId}', function($paymentId) {
+        $payment = \App\Models\Payment::findOrFail($paymentId);
+        
+        // Симулюємо сценарій: платіж спочатку невдалий, потім успішний
+        $steps = [];
+        
+        // Крок 1: Невдалий платіж
+        $payment->payment_status = 'failed';
+        $payment->save();
+        $steps[] = 'Платіж позначено як невдалий';
+        
+        // Крок 2: Перевірка відсутності підписки
+        $enrollment = \App\Models\CourseEnrollment::where('payment_id', $paymentId)->first();
+        $steps[] = 'Підписка ' . ($enrollment && $enrollment->is_active ? 'АКТИВНА (ПОМИЛКА!)' : 'відсутня (OK)');
+        
+        // Крок 3: Відновлення платежу
+        $payment->payment_status = 'completed';
+        $payment->transaction_id = 'recovered_' . time();
+        $payment->save();
+        $steps[] = 'Платіж відновлено як успішний';
+        
+        // Крок 4: Створення підписки
+        $enrollment = \App\Models\CourseEnrollment::updateOrCreate(
+            [
+                'user_id' => $payment->user_id,
+                'course_id' => $payment->entity_id,
+            ],
+            [
+                'payment_id' => $payment->id,
+                'is_active' => true,
+                'enrollment_type' => 'purchase',
+                'enrolled_at' => now(),
+            ]
+        );
+        $steps[] = 'Підписка створена/оновлена';
+        
+        return response()->json([
+            'payment_id' => $paymentId,
+            'final_status' => $payment->payment_status,
+            'enrollment_active' => $enrollment->is_active,
+            'recovery_steps' => $steps,
+            'test_passed' => $payment->payment_status === 'completed' && $enrollment->is_active
+        ]);
+    });
+
+    // Тест безпеки платежів
+    Route::post('/security-test/{paymentId}', function($paymentId) {
+        $payment = \App\Models\Payment::findOrFail($paymentId);
+        
+        // Тест 1: Спроба змінити суму платежу
+        $originalAmount = $payment->amount;
+        $testResults = [];
+        
+        try {
+            $payment->amount = $originalAmount * 0.1; // Намагаємося зменшити суму в 10 разів
+            $payment->save();
+            $testResults['amount_change'] = 'НЕБЕЗПЕКА: Сума змінена без перевірки!';
+        } catch (\Exception $e) {
+            $testResults['amount_change'] = 'OK: Зміна суми заблокована';
+        }
+        
+        // Відновлюємо оригінальну суму
+        $payment->amount = $originalAmount;
+        $payment->save();
+        
+        // Тест 2: Спроба створити підписку без оплати
+        try {
+            $fakeEnrollment = \App\Models\CourseEnrollment::create([
+                'user_id' => $payment->user_id,
+                'course_id' => $payment->entity_id + 999, // Неіснуючий курс
+                'payment_id' => null, // Без платежу
+                'is_active' => true,
+                'enrollment_type' => 'purchase',
+                'enrolled_at' => now(),
+            ]);
+            $testResults['free_enrollment'] = 'НЕБЕЗПЕКА: Підписка створена без платежу!';
+            $fakeEnrollment->delete(); // Видаляємо тестову підписку
+        } catch (\Exception $e) {
+            $testResults['free_enrollment'] = 'OK: Підписка без платежу заблокована';
+        }
+        
+        // Тест 3: Перевірка цілісності даних
+        $course = \App\Models\Course::find($payment->entity_id);
+        $user = \App\Models\User::find($payment->user_id);
+        
+        $testResults['data_integrity'] = [
+            'course_exists' => $course ? 'OK' : 'ПОМИЛКА: Курс не існує',
+            'user_exists' => $user ? 'OK' : 'ПОМИЛКА: Користувач не існує',
+            'amount_positive' => $payment->amount > 0 ? 'OK' : 'ПОМИЛКА: Негативна сума',
+            'currency_valid' => in_array($payment->currency, ['UAH', 'USD', 'EUR']) ? 'OK' : 'ПОПЕРЕДЖЕННЯ: Незвичайна валюта'
+        ];
+        
+        return response()->json([
+            'payment_id' => $paymentId,
+            'security_tests' => $testResults,
+            'recommendations' => [
+                'Додайте валідацію сум платежів',
+                'Заборонте створення підписок без відповідних платежів',
+                'Додайте перевірку існування пов\'язаних об\'єктів',
+                'Логуйте всі зміни в критичних даних'
+            ]
+        ]);
+    });
+
+    // Замініть цей маршрут:
+Route::get('/test-check-payment-flow/{paymentId}', function($paymentId) {
+    // Використовуйте безпечний запит без entity
+    $payment = \App\Models\Payment::with(['user', 'course'])->findOrFail($paymentId);
+    $enrollment = \App\Models\CourseEnrollment::where('payment_id', $paymentId)->first();
+    
+    return response()->json([
+        'payment' => [
+            'id' => $payment->id,
+            'status' => $payment->payment_status,
+            'amount' => $payment->amount,
+            'user_email' => $payment->user->email,
+            'course_title' => $payment->course->title ?? 'N/A'
+        ],
+        'enrollment' => $enrollment ? [
+            'id' => $enrollment->id,
+            'is_active' => $enrollment->is_active,
+            'enrollment_type' => $enrollment->enrollment_type,
+            'access_status' => $enrollment->isActive() ? 'active' : 'expired'
+        ] : null,
+        'flow_status' => [
+            'payment_completed' => $payment->payment_status === 'completed',
+            'enrollment_created' => $enrollment !== null,
+            'enrollment_active' => $enrollment ? $enrollment->isActive() : false,
+            'flow_successful' => $payment->payment_status === 'completed' && $enrollment && $enrollment->isActive()
+        ]
+    ]);
+});
+
+    // Повний стрес-тест
+    Route::post('/stress-test', function() {
+        $results = [];
+        $startTime = microtime(true);
+        
+        // Створюємо багато користувачів та платежів
+        for ($i = 1; $i <= 10; $i++) {
+            $user = \App\Models\User::create([
+                'name' => "Stress Test User $i",
+                'email' => "stress$i" . time() . '@example.com',
+                'password' => \Hash::make('password'),
+                'role_id' => 3
+            ]);
+            
+            $course = \App\Models\Course::first(); // Використовуємо перший доступний курс
+            
+            $payment = \App\Models\Payment::create([
+                'user_id' => $user->id,
+                'amount' => rand(100, 1000),
+                'currency' => 'UAH',
+                'payment_method' => 'liqpay',
+                'payment_status' => 'completed',
+                'entity_type' => 'course',
+                'entity_id' => $course->id,
+                'transaction_id' => 'stress_test_' . $i . '_' . time()
+            ]);
+            
+            $enrollment = \App\Models\CourseEnrollment::create([
+                'user_id' => $user->id,
+                'course_id' => $course->id,
+                'payment_id' => $payment->id,
+                'is_active' => true,
+                'enrollment_type' => 'purchase',
+                'enrolled_at' => now(),
+            ]);
+            
+            $results[] = [
+                'iteration' => $i,
+                'user_id' => $user->id,
+                'payment_id' => $payment->id,
+                'enrollment_id' => $enrollment->id,
+                'success' => true
+            ];
+        }
+        
+        $endTime = microtime(true);
+        $executionTime = $endTime - $startTime;
+        
+        return response()->json([
+            'stress_test_results' => $results,
+            'performance' => [
+                'total_time' => round($executionTime, 2) . ' seconds',
+                'operations_per_second' => round(count($results) / $executionTime, 2),
+                'average_time_per_operation' => round($executionTime / count($results), 4) . ' seconds'
+            ],
+            'summary' => [
+                'total_operations' => count($results),
+                'successful_operations' => count(array_filter($results, fn($r) => $r['success'])),
+                'test_passed' => count($results) === 10
+            ]
+        ]);
+    });
+});

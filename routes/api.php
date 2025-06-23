@@ -21,6 +21,8 @@ use App\Http\Controllers\Api\TestMediaController;
 use App\Http\Middleware\CheckCourseAccess;
 
 
+
+
 // ========================================
 // ТЕСТОВІ ТА ДОПОМІЖНІ МАРШРУТИ
 // ========================================
@@ -179,10 +181,11 @@ Route::prefix('lessons')->group(function () {
 Route::prefix('payments')->group(function () {
     // Callback від платіжної системи
     Route::post('/liqpay/callback', [PaymentController::class, 'liqpayCallback'])->name('liqpay.callback');
-    
     // Обробка результатів платежів
     Route::get('/{paymentId}/failed', [PaymentController::class, 'paymentFailed']);
     Route::post('/{paymentId}/retry', [PaymentController::class, 'retryPayment']);
+    // Додаю публічний маршрут успіху оплати
+    Route::get('/course/{courseId}/success', [PaymentController::class, 'paymentSuccess'])->name('courses.payment.success');
 });
 
 // ========================================
@@ -236,10 +239,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::prefix('payments')->group(function () {
         Route::get('/', [PaymentController::class, 'getUserPayments']);                        // Мої платежі
         Route::post('/course/{courseId}', [PaymentController::class, 'createCoursePayment']);  // Створити платіж
-        Route::post('/course/{courseId}/liqpay', [PaymentController::class, 'initiateCoursePayment']); // Ініціювати оплату через LiqPay
+        Route::post('/course/{courseId}', [PaymentController::class, 'initiateCoursePayment']); // Ініціювати оплату через LiqPay
         Route::get('/{paymentId}/status', [PaymentController::class, 'checkPaymentStatus']);   // Статус платежу
         Route::post('/{paymentId}/confirm', [PaymentController::class, 'confirmPayment']);     // Підтвердити платіж
-        Route::get('/course/{courseId}/success', [PaymentController::class, 'paymentSuccess'])->name('courses.payment.success');
         
         // Тестова відповідь для обробки платежів
         Route::get('/test-payment-callback/{paymentId}', [PaymentController::class, 'testProcessCallback']);

@@ -12,7 +12,8 @@
         "laravel/sanctum": "^4.0",
         "laravel/tinker": "^2.9",
         "liqpay/liqpay": "^1.4",
-        "twilio/sdk": "^8.6"
+        "twilio/sdk": "^8.6",
+        "wayforpay/php-sdk": "^1.0"
     },
     "require-dev": {
         "fakerphp/faker": "^1.23",
