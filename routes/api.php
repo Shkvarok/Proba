@@ -18,7 +18,6 @@ use App\Http\Controllers\Api\PaymentController;
 use App\Http\Controllers\Api\ReviewController;
 use App\Http\Controllers\Api\InternalTestController;
 use App\Http\Controllers\Api\TestMediaController;
-use App\Http\Middleware\CheckRole;
 use App\Http\Middleware\CheckCourseAccess;
 
 

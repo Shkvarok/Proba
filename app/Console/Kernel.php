@@ -14,6 +14,15 @@ class Kernel extends ConsoleKernel
     {
         // Інші заплановані завдання...
         $schedule->command('payments:update-pending')->daily();
+        
+        // Очищення логів раз в тиждень (щонеділі о 02:00)
+        $schedule->command('logs:cleanup --days=7 --force')
+                ->weekly()
+                ->sundays()
+                ->at('02:00')
+                ->withoutOverlapping()
+                ->runInBackground()
+                ->appendOutputTo(storage_path('logs/cleanup.log'));
     }
 
     /**
